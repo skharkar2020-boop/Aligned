@@ -20,6 +20,18 @@ This creates a hard negative: naive single-cohort correlation picks M2 (the
 only one that looks like anything in that cohort); correct
 generalization-aware analysis across both cohorts picks M1. Verified
 empirically across 6 independent seeds (see analysis notes in task repo).
+
+Retuning pass 2 (post fresh-agent screen): the first calibration made M1
+"win" multi-dose by a wide margin but left M2's single-dose signal too weak
+to be a genuine false lead (p=0.06, not significant) -- a careful agent
+could skip the intended cross-cohort check entirely by noticing single-dose
+data reads as pure noise. Strengthened M2's confound via Z_CV and a new
+Z_M2_CLEARANCE_EXPONENT (not GAMMA_Z, which was tried first and made the
+signal-to-noise ratio worse, not better). Separately widened the M1-vs-parent
+multi-dose margin via realistic parent-specific variability
+(CL_PARENT_IIV_SD, PARENT_EXTRA_ASSAY_NOISE_CV) -- this only partially
+closed that margin within literature-defensible bounds; see task/README.md
+for the full numeric record and the honest limitation.
 """
 
 import hashlib
@@ -43,6 +55,17 @@ def stable_seed(*parts) -> int:
 
 # ---- True PK parameters (population means, log-normal IIV) ----
 CL_PARENT = 8.0      # L/hr
+# Between-subject clearance variability for the parent compound. 0.60 is a
+# log-normal SD corresponding to ~66% CV -- at the high end of, but within,
+# published population-PK ranges for orally-cleared small molecules (e.g.
+# PF-04965842 CL/F interindividual CV = 63%; JNJ-42165279 = 35.9% CV;
+# CYP3A4/CYP2C8-mediated clearance ~52-54% CV). Chosen because parent
+# concentration mechanistically drives M1/M2 formation in the ODEs below, so
+# pushing this past the literature ceiling both loses scientific grounding
+# AND empirically hurts the M1-vs-parent separation (degrades M1's own
+# signal via the shared precursor pathway, not just parent's) -- verified
+# non-monotonic across 0.60/0.75/0.90/1.10 at n=10/dose, 6 seeds.
+CL_PARENT_IIV_SD = 0.60
 V_PARENT = 40.0       # L
 KA = 1.2              # 1/hr absorption
 
@@ -59,8 +82,20 @@ V_M2 = 20.0           # L
 # Hidden per-subject covariate (e.g. hepatic/renal function phenotype).
 # Confound: Z lowers M2 clearance (raises M2 AUC) in the UNINDUCED state,
 # and independently shifts PD severity -- but has no PK link to M1.
-Z_CV = 0.40
+Z_CV = 0.55
 GAMMA_Z = 14.0  # PD severity contribution scale
+# M2 clearance scales as z_value ** this exponent (was implicitly 1.0).
+# Raising it stretches out M2 AUC's response to the SAME Z distribution --
+# strengthens the single-dose M2-PD confound signal without also inflating
+# the severity term's noise contribution the way raising Z_CV/GAMMA_Z does
+# (severity depends on log(Z), unaffected by this exponent). Tried GAMMA_Z
+# alone first; it made things WORSE (adds severity noise faster than it adds
+# M2 signal, since severity variance scales ~GAMMA_Z^2 while the shared-Z
+# covariance driving the confound scales ~GAMMA_Z). Verified across 6 seeds
+# at n=10/dose: Z_CV=0.55 + this exponent=1.5 gives single-dose M2 Spearman
+# p<0.05 in 6/6 seeds, while M1/parent stay non-significant (noise-like) in
+# 6/6 seeds.
+Z_M2_CLEARANCE_EXPONENT = 1.5
 
 # PD: true mechanistic driver is M1 exposure only (Emax model), PLUS the
 # independent Z-linked severity term (present in both cohorts equally).
@@ -75,13 +110,23 @@ HILL = 3.0
 PD_NOISE_SD = 3.0
 
 PK_NOISE_CV = 0.12  # 12% proportional assay noise
+# Extra matrix-effect/ion-suppression noise specific to the parent-compound
+# assay (parent co-elutes with its own metabolites more often than a
+# metabolite does with its precursor in practice), applied only to recorded
+# parent concentrations -- degrades parent's AUC precision without touching
+# M1/M2. Capped at 20%: typical FDA/EMA bioanalytical validation guidance
+# expects assay CV below ~15-20%, so this sits at the upper edge of
+# defensible assay noise rather than beyond it (30% was tested and works
+# somewhat better numerically, but exceeds normal validated-assay guidance
+# and was judged not worth the scientific-grounding risk).
+PARENT_EXTRA_ASSAY_NOISE_CV = 0.20
 
 
 def simulate_subject(dose_mg, n_doses, tau_hr, iiv_seed, obs_end_hr=None, z_value=1.0):
     """Simulate one subject's PK for parent/M1/M2 over a dosing regimen."""
     rs = np.random.default_rng(iiv_seed)
     # log-normal inter-individual variability, ~25% CV on key params
-    cl_p = CL_PARENT * np.exp(rs.normal(0, 0.25))
+    cl_p = CL_PARENT * np.exp(rs.normal(0, CL_PARENT_IIV_SD))
     v_p = V_PARENT * np.exp(rs.normal(0, 0.15))
     kfm1 = K_FORM_M1 * np.exp(rs.normal(0, 0.20))
     cl_m1 = CL_M1 * np.exp(rs.normal(0, 0.20))
@@ -92,7 +137,7 @@ def simulate_subject(dose_mg, n_doses, tau_hr, iiv_seed, obs_end_hr=None, z_valu
 
     if n_doses == 1:
         # Uninduced: Z lowers clearance (raises M2 AUC) -- confound active
-        cl_m2 = CL_M2_BASE * z_value * np.exp(rs.normal(0, 0.15))
+        cl_m2 = CL_M2_BASE * (z_value ** Z_M2_CLEARANCE_EXPONENT) * np.exp(rs.normal(0, 0.15))
     else:
         # Repeated dosing -> autoinduction overrides baseline Z-linked clearance
         cl_m2 = CL_M2_INDUCED * np.exp(rs.normal(0, 0.15))
@@ -179,7 +224,10 @@ def build_cohort(cohort_name, dose_levels, n_subjects_per_dose, n_doses, tau_hr,
             for st in sample_t:
                 idx = np.argmin(np.abs(t_full - st))
                 for analyte, conc in [("parent", c_p[idx]), ("M1", c_m1[idx]), ("M2", c_m2[idx])]:
-                    noisy = max(0.0, conc * (1 + rng.normal(0, PK_NOISE_CV)))
+                    noisy = conc * (1 + rng.normal(0, PK_NOISE_CV))
+                    if analyte == "parent":
+                        noisy *= (1 + rng.normal(0, PARENT_EXTRA_ASSAY_NOISE_CV))
+                    noisy = max(0.0, noisy)
                     records_pk.append({
                         "subject_id": f"S{subj_id:03d}",
                         "cohort": cohort_name,
