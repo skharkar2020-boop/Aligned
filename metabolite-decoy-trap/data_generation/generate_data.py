@@ -97,6 +97,38 @@ GAMMA_Z = 14.0  # PD severity contribution scale
 # 6/6 seeds.
 Z_M2_CLEARANCE_EXPONENT = 1.5
 
+# Independent metabolite-specific formation/elimination random effects,
+# drawn independently of CL_PARENT_IIV_SD and of each other. Added after
+# three consecutive fixes (parent-IIV widening, checking M2's autoinduction,
+# M2-specific multi-dose observation noise up to 800% CV) all hit the same
+# wall: parent/M1/M2 were near-deterministic functions of one shared c_p(t)
+# trajectory (parent-M1 r=0.92, parent-M2 r=0.92, M1-M2 r=0.84), and
+# post-hoc observation noise cannot break a correlation baked in at the
+# ODE/formation level. Real active-metabolite systems show metabolite-
+# specific variability distinct from the parent's own clearance variability
+# -- e.g., in risperidone/9-hydroxyrisperidone population PK, CYP2D6
+# genotype explains ~52% of the parent's own PK variability, but the
+# metabolite's elimination clearance responds to different covariates (age,
+# renal function) than parent clearance does, and a related antipsychotic
+# joint PK model found non-parent metabolite elimination clearance varying
+# ~35% (range 9-53%) with genotype, independent of parent clearance --
+# formation and elimination of a metabolite are mechanistically decomposable
+# from the parent's own PK, not two views of the same variability.
+# Calibrated (6 seeds, n=10/dose): 0.45 centers multi-dose M1-M2 correlation
+# at 0.30-0.36 (target band achieved); parent-M1/parent-M2 drop from
+# 0.86-0.89 to 0.68-0.71 / 0.59-0.64 (meaningfully reduced, though M1-M2
+# decays faster than parent-M1/parent-M2 under symmetric noise and the two
+# targets can't be hit simultaneously -- see task/README.md). The actual
+# functional target -- M1's multi-dose dominance margin over both parent and
+# M2 -- improved from a fragile ~0.04-0.09 to a robust 0.27-0.33 in all 6
+# seeds, and M2's multi-dose correlation with response became non-
+# significant (p=0.06-0.17) in all 6 seeds, directly resolving the
+# fresh-agent-screen failure mode (M2 no longer "replicates" across cohorts).
+SIGMA_FORM_M1 = 0.45
+SIGMA_ELIM_M1 = 0.45
+SIGMA_FORM_M2 = 0.45
+SIGMA_ELIM_M2 = 0.45
+
 # PD: true mechanistic driver is M1 exposure only (Emax model), PLUS the
 # independent Z-linked severity term (present in both cohorts equally).
 # EC50/HILL are set so the M1 pharmacodynamic effect only engages once
@@ -134,19 +166,28 @@ def simulate_subject(dose_mg, n_doses, tau_hr, iiv_seed, obs_end_hr=None, z_valu
     # log-normal inter-individual variability, ~25% CV on key params
     cl_p = CL_PARENT * np.exp(rs.normal(0, CL_PARENT_IIV_SD))
     v_p = V_PARENT * np.exp(rs.normal(0, 0.15))
-    kfm1 = K_FORM_M1 * np.exp(rs.normal(0, 0.20))
-    cl_m1 = CL_M1 * np.exp(rs.normal(0, 0.20))
+    # SIGMA_FORM_*/SIGMA_ELIM_* are independent metabolite-specific random
+    # effects on top of the base ~20-25% variability already on each rate
+    # constant -- see the constant definitions above for the literature
+    # rationale and calibration.
+    kfm1 = K_FORM_M1 * np.exp(rs.normal(0, 0.20)) * np.exp(rs.normal(0, SIGMA_FORM_M1))
+    cl_m1 = CL_M1 * np.exp(rs.normal(0, 0.20)) * np.exp(rs.normal(0, SIGMA_ELIM_M1))
     v_m1 = V_M1 * np.exp(rs.normal(0, 0.15))
-    vmax_m2 = K_FORM_M2_VMAX * np.exp(rs.normal(0, 0.25))
+    vmax_m2 = K_FORM_M2_VMAX * np.exp(rs.normal(0, 0.25)) * np.exp(rs.normal(0, SIGMA_FORM_M2))
     km_m2 = K_FORM_M2_KM * np.exp(rs.normal(0, 0.20))
     v_m2 = V_M2 * np.exp(rs.normal(0, 0.15))
 
     if n_doses == 1:
         # Uninduced: Z lowers clearance (raises M2 AUC) -- confound active
-        cl_m2 = CL_M2_BASE * (z_value ** Z_M2_CLEARANCE_EXPONENT) * np.exp(rs.normal(0, 0.15))
+        cl_m2 = (
+            CL_M2_BASE
+            * (z_value ** Z_M2_CLEARANCE_EXPONENT)
+            * np.exp(rs.normal(0, 0.15))
+            * np.exp(rs.normal(0, SIGMA_ELIM_M2))
+        )
     else:
         # Repeated dosing -> autoinduction overrides baseline Z-linked clearance
-        cl_m2 = CL_M2_INDUCED * np.exp(rs.normal(0, 0.15))
+        cl_m2 = CL_M2_INDUCED * np.exp(rs.normal(0, 0.15)) * np.exp(rs.normal(0, SIGMA_ELIM_M2))
 
     def odes(y, t):
         a_gut, c_p, c_m1, c_m2 = y

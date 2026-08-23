@@ -139,6 +139,81 @@ match what the fresh-agent screen actually computed and what a statistically
 careful analyst would default to given the nonlinear (threshold-like)
 exposure-response shape.
 
+### Retuning pass 3: shared-parent-precursor collinearity
+
+A second fresh-agent screen against the pass-2 data nominated **M2**, not
+M1 -- via legitimate reasoning, not carelessness. The agent noticed dose
+predicts response in multi-dose but not single-dose, treated single-dose as
+the "clean" cohort, and picked the one species significant in *both*
+cohorts (M2). M1's threshold-gated effect is, by construction, invisible in
+single-dose, so a "prefer what replicates across cohorts" heuristic
+systematically favored the decoy -- a structural mismatch, not a tuning gap.
+
+Three fixes were tried in sequence, each hitting the same wall:
+
+1. **"Strengthen autoinduction"** (the originally-suspected cause) turned out
+   to be a non-issue on inspection: the multi-dose `cl_m2` branch already had
+   zero `z_value` term -- Z's link to M2 clearance was already 100% severed
+   post-induction. Nothing to strengthen.
+2. Traced the real cause empirically: multi-dose M2-response correlation
+   (rho=0.64) barely moved after dose-adjustment (rho=0.62 partial), ruling
+   out dose-collinearity too. The actual cause: `parent`/`M1`/`M2` AUC were
+   pairwise correlated at 0.84-0.92 in multi-dose -- all three are
+   near-deterministic transforms of the same per-subject `c_p(t)` trajectory,
+   so M2 rides along on M1's real signal purely via shared PK precursor.
+   Also surfaced that **parent, not M2, was already the actual runner-up**
+   against M1 in multi-dose (parent rho=0.729 > M2 rho=0.632) -- the
+   dominance-margin metric had been silently insensitive to M2-specific
+   changes because parent was the binding constraint the whole time.
+3. **M2-specific post-hoc observation noise** (structurally the same lever as
+   `PARENT_EXTRA_ASSAY_NOISE_CV`, applied only to recorded M2 concentrations
+   in multi-dose): swept 0-800% CV. M2's rho only dropped to ~0.36-0.57 and
+   **never** crossed non-significance at any tested level, because the
+   correlation is baked in at the ODE formation level (M2 forms from parent
+   concentration via Michaelis-Menten kinetics), which this kind of
+   after-the-fact noise cannot reach by construction.
+
+**The fix that worked**: independent metabolite-specific formation and
+elimination random effects (`SIGMA_FORM_M1`, `SIGMA_ELIM_M1`,
+`SIGMA_FORM_M2`, `SIGMA_ELIM_M2`, all multiplicative log-normal terms drawn
+independently of `CL_PARENT_IIV_SD` and of each other, applied inside the
+ODE so they genuinely decouple the AUC trajectories rather than just
+perturbing recorded samples). Grounded in real active-metabolite population-
+PK literature (risperidone/9-hydroxyrisperidone): CYP2D6 genotype explains
+~52% of the parent's own PK variability, but the metabolite's elimination
+clearance responds to different covariates (age, renal function) than
+parent clearance; a related antipsychotic joint-PK model found non-parent
+metabolite elimination clearance varying ~35% (range 9-53%) with genotype,
+independent of parent clearance -- formation and elimination of a
+metabolite are mechanistically decomposable from the parent's own PK.
+
+Calibrated at `sigma=0.45` for all four terms (6 seeds, n=10/dose). Note:
+M1-M2 correlation decays *faster* than parent-M1/parent-M2 under symmetric
+noise (M1-M2 shares one factor but both sides gain independent noise;
+parent-M1 shares the same factor but only M1 gains extra noise), so the
+0.3-0.5 target band could not be hit simultaneously for all three pairs --
+M1-M2 centers at 0.30-0.36 (in band), while parent-M1 (0.68-0.71) and
+parent-M2 (0.59-0.64) are reduced from baseline (0.86-0.89) but land above
+the stated target. This was accepted because the actual functional targets
+cleared with a wide margin regardless:
+
+- M1 multi-dose dominance margin over both parent and M2: **0.27-0.33** in
+  all 6 seeds (up from a fragile 0.04-0.09 pre-fix) -- an order of magnitude
+  more headroom than before.
+- M2 multi-dose association with response: **non-significant** (p=0.06-0.17)
+  in all 6 seeds -- M2 is now significant *only* in single-dose, directly
+  resolving the fresh-agent failure mode (nothing "replicates across both
+  cohorts" except the true driver M1).
+- M1 single-dose non-significance and M2 single-dose significance (the
+  pass-2 fixes): unaffected, 6/6 seeds each, as expected since these random
+  effects don't touch the Z-confound or EC50/HILL mechanisms.
+
+`MIN_DOMINANCE_MARGIN` in `test_outputs.py` was left at `0.03` rather than
+re-tightened to match the new, much larger observed floor (~0.27) -- the
+lower bound is still valid (comfortably conservative) and re-tightening
+would only add risk without benefit at this stage. A future pass could
+re-calibrate it tighter if desired.
+
 ## Container contract
 
 The runtime Dockerfile builds explicitly for Linux/amd64, copies only
