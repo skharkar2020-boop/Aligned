@@ -56,6 +56,89 @@ from the project root writes `data_generation/public/*.csv` (copy these into
 `data_generation/private/subjects_ground_truth.csv` (authoring-only, never
 ships).
 
+### Retuning pass 2: fresh-agent screen findings
+
+Step 0's fresh-agent screen (pasting `instruction.md` plus the generated CSVs
+into a context-free session) solved correctly (nominated M1) but exposed two
+real gaps in the pass-1 calibration above, both confirmed by independently
+recomputing Spearman correlation from the shipped data:
+
+1. **M2's single-dose "decoy" signal was itself not statistically
+   significant** (rho=0.27, p=0.06 at n=50). A careful agent could skip the
+   intended cross-cohort reasoning entirely just by noticing single-dose data
+   reads as pure noise for everyone and falling back to multi-dose — right
+   answer, wrong (bypassed) skill.
+2. **The real fragility was M1-vs-parent in multi-dose, not M1-vs-M2**: a
+   margin of only ~0.04 (0.79 vs 0.75), thin enough that a different AUC or
+   correlation method could plausibly flip it.
+
+**Fix 1 (M2 single-dose significance) — solid, robust.** `GAMMA_Z` was tried
+first as the lever and made things *worse*: severity-term noise variance
+scales ~`GAMMA_Z^2` while the shared-Z covariance driving the confound scales
+~`GAMMA_Z`, so raising it dilutes signal-to-noise rather than improving it.
+Instead added `Z_M2_CLEARANCE_EXPONENT` (M2 clearance now scales as
+`z_value ** 1.5` instead of linearly) alongside `Z_CV: 0.40 -> 0.55` — this
+stretches M2's response to the *same* Z distribution without inflating
+severity noise (severity depends on `log(Z)`, unaffected by the exponent).
+Verified across 6 seeds at n=10/dose: single-dose M2 Spearman p<0.05 in 6/6
+seeds, M1 and parent stay non-significant (noise-like) in 6/6 seeds.
+
+**Fix 2 (M1-vs-parent multi-dose margin) — investigated thoroughly, only
+partially closed within realistic bounds; documenting the negative result
+along with the positive one.**
+
+Two directions were tried:
+
+- *Degrade parent specifically*: `CL_PARENT_IIV_SD` (parent's own
+  between-subject clearance variability, was folded into the shared 0.25 IIV
+  constant, now a named parameter) and `PARENT_EXTRA_ASSAY_NOISE_CV`
+  (matrix-effect/ion-suppression noise applied only to recorded parent
+  concentrations, not the true concentration feeding M1/M2 formation).
+  Checked against real population-PK literature before pushing either: oral
+  clearance CV for small-molecule kinase inhibitors is typically 35-65%
+  (PF-04965842 CL/F CV=63%, JNJ-42165279=35.9%, CYP3A4/CYP2C8-mediated
+  clearance ~52-54%), so `CL_PARENT_IIV_SD=0.60` (=~66% CV) sits at the
+  literature ceiling, not beyond it; pushing past 0.60 was tested (0.75-1.10)
+  and empirically made the margin *worse*, not better, because parent
+  concentration mechanistically drives M1/M2 formation in the ODEs, so noise
+  added to parent partially propagates into M1 too. `PARENT_EXTRA_ASSAY_NOISE_CV`
+  was capped at 0.20: typical FDA/EMA bioanalytical validation guidance
+  expects assay CV below ~15-20%; 0.30 was tested and produces a better
+  margin numerically but was rejected as exceeding normal validated-assay
+  noise.
+- *Strengthen M1's own signal*: swept `EMAX in {80,100,120}`,
+  `EC50_AUC_M1 in {250,300,350}`, `HILL in {3.0,4.0}` at the confirmed 20%
+  assay-noise setting. Best finding: `EC50_AUC_M1=250` (down from 300),
+  `EMAX`/`HILL` unchanged, gives the best available margin without
+  reintroducing single-dose signal for M1. `HILL=4.0` (steeper Emax curve)
+  actively hurt: it bled sensitivity into the single-dose noise floor,
+  eroding M2's single-dose significance and parent's single-dose
+  non-significance in several combos — exactly the property this pass most
+  needed to protect.
+
+Neither direction, kept within literature/guidance-defensible bounds, gets
+the M1-vs-parent multi-dose margin robustly above an a priori target across
+the majority of a 6-seed grid. At the final shipped settings (`EC50_AUC_M1=250`,
+`Z_CV=0.55`, `Z_M2_CLEARANCE_EXPONENT=1.5`, `CL_PARENT_IIV_SD=0.60`,
+`PARENT_EXTRA_ASSAY_NOISE_CV=0.20`), the margin (Spearman, M1 minus the
+stronger of parent/M2, multi-dose) across 6 seeds is: **0.0537, 0.0723,
+0.0753, 0.0777, 0.0815, 0.0866** (floor 0.054, mean 0.075) — consistently
+positive and a real ~2x improvement over the pass-1 margin (~0.02-0.04), but
+modest, not dramatic. This is flagged as a known limitation rather than
+oversold; see the "Solution and verifier design" section below for how the
+verifier's dominance threshold was calibrated directly from this
+distribution rather than an arbitrary a priori number. Widening this margin
+further would need a structural change (e.g. a genuine PK-level pathway that
+decouples parent from the M1/M2 precursor relationship), which is out of
+scope for this parameter-tuning pass.
+
+**Also switched the correlation statistic from raw Pearson to rank
+correlation (Spearman)** in both `solve.py` and `test_outputs.py`
+(implemented via `pandas.rank()` + `np.corrcoef`, no new dependency), to
+match what the fresh-agent screen actually computed and what a statistically
+careful analyst would default to given the nonlinear (threshold-like)
+exposure-response shape.
+
 ## Container contract
 
 The runtime Dockerfile builds explicitly for Linux/amd64, copies only
@@ -74,9 +157,9 @@ used by submission.
 `solution/solve.py` computes each subject's per-analyte AUC via the
 trapezoidal rule over the visible sparse concentration samples, splits
 subjects by dosing regimen (`n_doses == 1` vs. `n_doses > 1`, not by the
-`cohort` label string), computes each candidate's Pearson correlation with PD
-response within each regimen, and nominates the species whose correlation is
-strongest in the multi-dose steady-state regimen.
+`cohort` label string), computes each candidate's rank correlation
+(Spearman) with PD response within each regimen, and nominates the species
+whose correlation is strongest in the multi-dose steady-state regimen.
 
 `tests/test_outputs.py` independently recomputes the same AUC/correlation
 pipeline from its own copy of the data (`tests/data/`, byte-identical to
@@ -84,20 +167,24 @@ pipeline from its own copy of the data (`tests/data/`, byte-identical to
 
 - schema/finite-value validity of `result.json`;
 - the nominated species' recomputed multi-dose association exceeds every
-  other candidate's by at least 0.04 (a relative-dominance check against the
-  verifier's own recomputation, not a fixed absolute correlation cutoff —
-  chosen well below the ~0.06-0.11 margin observed across seeds during
-  authoring, so it tolerates a reasonable alternative AUC methodology while
-  still rejecting a wrong nomination);
+  other candidate's by at least `MIN_DOMINANCE_MARGIN = 0.03` (a
+  relative-dominance check against the verifier's own recomputation, not a
+  fixed absolute correlation cutoff). This value is derived empirically, not
+  guessed: see "Retuning pass 2" above for the 6-seed margin distribution
+  (floor 0.054, mean 0.075) it's calibrated against — 0.03 sits with ~45%
+  headroom below the observed floor, so a reasonable alternative AUC or
+  correlation methodology still passes, while a wrong nomination (M2 or
+  parent, whose recomputed margin is negative in every tested seed) still
+  fails;
 - the agent's reported `single_dose_association` / `multi_dose_association`
   values for the nominated species are within 0.20 of the independent
   recomputation (an integrity check against fabricated or copy-pasted
   numbers).
 
-Manually verified both failure directions: a `"M2"` nomination and a
-`"parent"` nomination each fail the dominance test (multi-dose margins of
--0.27 and -0.10 respectively against the recomputed values), while the
-Oracle's `"M1"` nomination passes all three tests.
+Manually verified both failure directions on the shipped (seed=42) dataset: a
+`"M2"` nomination and a `"parent"` nomination each fail the dominance test,
+while the Oracle's `"M1"` nomination (`multi_dose_association=0.7564`,
+margin 0.0723 over parent) passes all three tests.
 
 ## Local commands
 

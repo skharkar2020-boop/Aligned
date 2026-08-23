@@ -1,15 +1,19 @@
-<!-- TEMPLATE ONLY: replace this contract before running a benchmark campaign. -->
+A DMPK group is investigating a promising new lead, called CPD7, which is converted to metabolites M1 and M2 within the bloodstream. The group has collected PK and PD data from two distinct patient cohorts. Investigate the data and determine which of the measured species' exposure best predicts the pharmacological response. Data are available in the following files:
 
-# Replace with the scientific task title
+/workspace/data/pk_concentrations.csv
+Columns: subject_id, cohort, time_hr, analyte, conc_ng_ml
+Three analytes present: parent, M1, M2
 
-Replace this paragraph with a concise statement of the real research objective. Name the decision the result supports, but do not prescribe a reference implementation or an ordered recipe.
+/workspace/data/pd_response.csv
+Columns: subject_id, cohort, response
 
-The task inputs are available under `/workspace/data`. Replace this sentence with the absolute path, format, units, dimensions, and scientifically relevant fields for each public input. If an input is generated, describe the generated artifact and keep its deterministic generator in `environment/`.
+/workspace/data/subjects.csv
+Columns: subject_id, cohort, dose_mg, n_doses, tau_hr
 
-Produce the required deliverables under `/workspace/output`. This starter contract uses the following smoke outputs; replace the filenames and schema with the actual scientific output contract:
+Save your result to /workspace/output/result.json using this schema:
 
-- `/workspace/output/result.json`: a JSON object with exactly `n_observations`, `mean_value`, `std_value`, `minimum`, and `maximum`.
-
-For the starter smoke contract, `result.json` summarizes the numeric `value` column in `/workspace/data/input.csv` using finite numbers and a population standard deviation. A finished task should instead state the domain-specific definitions, units, constraints, and exact structured-output schema that its verifier checks.
-
-Do not hardcode expected output values. Keep all final files under `/workspace/output` and make the computation reproducible from the visible inputs.
+{
+  "nominated_species": "string",
+  "single_dose_association": 0.0,
+  "multi_dose_association": 0.0
+}

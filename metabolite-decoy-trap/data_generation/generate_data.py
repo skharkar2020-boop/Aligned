@@ -105,7 +105,13 @@ Z_M2_CLEARANCE_EXPONENT = 1.5
 # that requires accumulation) and the reason M1's true signal is invisible
 # in the single-dose cohort and dominant in the multi-dose cohort.
 EMAX = 80.0
-EC50_AUC_M1 = 300.0   # ng*hr/mL equivalent scale
+# Lowered from 300 during round-2 retuning: raising EMAX/lowering EC50/
+# raising HILL were swept together (n=10/dose, 6 seeds) to try to widen the
+# M1-vs-parent multi-dose margin. EC50=250 gave the best margin without
+# reintroducing single-dose signal for M1; raising HILL past 3.0 actively
+# hurt (bled sensitivity into the single-dose noise floor). See
+# task/README.md for the full sweep record.
+EC50_AUC_M1 = 250.0   # ng*hr/mL equivalent scale
 HILL = 3.0
 PD_NOISE_SD = 3.0
 

@@ -34,10 +34,17 @@ def compute_subject_auc(pk: pd.DataFrame) -> pd.DataFrame:
 
 
 def association(auc: np.ndarray, response: np.ndarray) -> float:
-    """Pearson correlation between an analyte's exposure and PD response."""
+    """Rank correlation (Spearman) between an analyte's exposure and PD
+    response. Ranking first, then correlating, is more robust to the
+    nonlinear (threshold-like) shape of the true exposure-response curve and
+    to outlier subjects than a raw Pearson correlation on untransformed
+    values -- and it's what a statistically careful analyst would compute by
+    default rather than assuming linearity."""
     if np.std(auc) == 0 or np.std(response) == 0:
         return 0.0
-    return float(np.corrcoef(auc, response)[0, 1])
+    auc_rank = pd.Series(auc).rank().to_numpy()
+    response_rank = pd.Series(response).rank().to_numpy()
+    return float(np.corrcoef(auc_rank, response_rank)[0, 1])
 
 
 def main() -> None:

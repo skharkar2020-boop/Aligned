@@ -28,9 +28,11 @@ cohort or a naive pooled correlation.
    subject-level exposure (AUC) estimate. This is the standard non-compartmental
    estimate available from sparse sampling; no compartmental model needs to be
    fit.
-3. Compute each candidate's exposure-response association (Pearson
-   correlation between AUC and PD response) separately within each dosing
-   regimen. Do not pool subjects across regimens before correlating — the two
+3. Compute each candidate's exposure-response association (rank correlation
+   between AUC and PD response — more robust to the nonlinear exposure-response
+   shape and to outlier subjects than a raw linear correlation) separately
+   within each dosing regimen. Do not pool subjects across regimens before
+   correlating — the two
    regimens differ enough in AUC scale and subject count that pooling can
    distort or mask the relationship.
 4. Compare the three candidates. In the single-dose data, the decoy can look

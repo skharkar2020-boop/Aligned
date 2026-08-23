@@ -30,7 +30,14 @@ _trapz = getattr(np, "trapezoid", None) or np.trapz
 # A candidate's steady-state association must exceed every other candidate's
 # by at least this much (in the verifier's own recomputation) to count as
 # genuinely dominant, not a marginal artifact of one AUC-estimation method.
-MIN_DOMINANCE_MARGIN = 0.04
+# Derived empirically, not guessed: across a 6-seed sweep at the shipped
+# sample size (n=10/dose), the true driver's margin over the runner-up
+# ranged 0.054-0.087 (floor 0.054, mean 0.075). This threshold sits clearly
+# below that observed floor (~45% headroom) so a reasonable alternative AUC
+# or correlation methodology still passes, while a wrong nomination (whose
+# recomputed margin is negative in every tested seed) still fails. See
+# task/README.md for the full sweep record.
+MIN_DOMINANCE_MARGIN = 0.03
 # How far the agent's reported association may drift from the verifier's
 # independent recomputation for the same species before it looks fabricated
 # or derived from a materially different (and therefore unverifiable) method.
@@ -47,9 +54,13 @@ def _subject_auc(pk: pd.DataFrame) -> pd.DataFrame:
 
 
 def _association(auc: np.ndarray, response: np.ndarray) -> float:
+    """Rank correlation (Spearman), matching solution/solve.py -- see that
+    file for why rank correlation rather than raw Pearson."""
     if np.std(auc) == 0 or np.std(response) == 0:
         return 0.0
-    return float(np.corrcoef(auc, response)[0, 1])
+    auc_rank = pd.Series(auc).rank().to_numpy()
+    response_rank = pd.Series(response).rank().to_numpy()
+    return float(np.corrcoef(auc_rank, response_rank)[0, 1])
 
 
 @pytest.fixture(scope="module")
