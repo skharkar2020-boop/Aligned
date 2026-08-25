@@ -1,0 +1,14 @@
+sample_id,condition,batch,qc_pass
+sample_1,control,batch1,True
+sample_2,control,batch1,True
+sample_3,control,batch1,True
+sample_4,control,batch1,True
+sample_5,control,batch1,True
+sample_6,control,batch1,True
+sample_7,treated,batch1,True
+sample_8,treated,batch1,True
+sample_9,treated,batch1,True
+sample_10,treated,batch1,True
+sample_11,treated,batch1,True
+sample_12,treated,batch1,True
+sample_02,treated,batch2,True

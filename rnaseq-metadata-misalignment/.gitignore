@@ -1,0 +1,27 @@
+.DS_Store
+.idea/
+*.swp
+*.swo
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local authoring environment created by ./scripts/setup.sh.
+.venv/
+
+.runner-logs/
+task/.runner-logs/
+task/output/
+harbor-jobs/
+*.modal-run.json
+completed_trajectories/
+.submission.tmp.*
+
+# Do not commit local credentials or machine-specific settings.
+.env
+.env.*
+!.env.example
+
+# Keep generated scientific data out unless it is deliberately vendored.
+task/environment/data/*.generated

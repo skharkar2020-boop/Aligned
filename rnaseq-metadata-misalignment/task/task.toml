@@ -1,0 +1,50 @@
+schema_version = "1.1"
+
+artifacts = [
+    "/workspace/output/result.json",
+]
+
+[task]
+# REPLACE: name/description are part of the hand-authored task voice --
+# see the note at the top of instruction.md for why this file is left as a
+# skeleton for the human author rather than filled in here.
+name = "aligned/replace_me_rnaseq-metadata-misalignment"
+description = "REPLACE: one-line description of the practitioner decision this task represents."
+
+[metadata]
+author_name = "Replace with author name"
+author_email = "replace@example.com"
+author_organization = "Replace with organization"
+category = "scientific-computing"
+tags = ["scientific-computing", "transcriptomics", "differential-expression", "data-quality", "python", "pytest"]
+expert_time_estimate_hours = 2.0 # REPLACE: set from your own judgment of the reference workflow, not agent runtime.
+
+# REPLACE all three: write these in your own voice from the reference
+# workflow you actually validated (see task/solution/process.md and the
+# empirical calibration notes below instruction.md's draft). Do not have an
+# LLM write these -- see the note at the top of instruction.md.
+difficulty_explanation = "REPLACE: name the scientific/engineering decision bottleneck (silent sample/label misalignment surviving a shape-only sanity check), why the layered bugs make it hard for an expert to localize (a real but unrelated crash first, then two independently-plausible wrong alignments depending on an unrelated dependency pin), and who would actually do this work (a computational biologist auditing a compound-response RNA-seq pipeline before advancing a candidate)."
+solution_explanation = "REPLACE: summarize solve.py's actual strategy -- run the shipped pipeline, fix the np.float crash, trace the QC-report sort and the positional merge in align.py, rejoin expression columns to metadata sample_id explicitly, and report the top gene with an explicit per-sample ID verification count."
+verification_explanation = "REPLACE: describe the independent recomputation in test_outputs.py and justify the log2 fold-change and adjusted p-value tolerances against the wrong-alignment scenarios actually measured during authoring (see task/tests/test_outputs.py comments for the specific margins)."
+
+[verifier]
+timeout_sec = 300.0
+user = "root"
+# environment_mode is intentionally unset. Do not use separate environment
+
+[agent]
+timeout_sec = 3600.0
+user = "agent"
+
+[environment]
+build_timeout_sec = 600.0
+cpus = 2
+memory_mb = 2048
+storage_mb = 4096
+gpus = 0
+# Client policy: the Oracle and the agent trials both run with public network
+# in case the agent wants to check package documentation or pip install an
+# alternative library version while debugging. The toolchain itself is not
+# fetched at run time: numpy/pandas/scipy/pytest are vendored in wheels/ and
+# installed offline at build time (see environment/Dockerfile).
+network_mode = "public"
