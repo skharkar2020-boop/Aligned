@@ -1,25 +1,24 @@
 schema_version = "1.1"
 
-# Replace this list with every file the verifier needs from the agent output.
 artifacts = [
     "/workspace/output/result.json",
 ]
 
 [task]
-name = "aligned/replace_me_scientific-analysis"
-description = "Starter template for a reproducible scientific analysis task; replace the placeholder contract before use."
+name = "aligned/cpd7-metabolite-decoy-trap"
+description = "Nominate which of a drug candidate's parent compound and two metabolites (M1, M2) is the true pharmacodynamic driver, from sparse PK/PD data spanning single-dose and multi-dose steady-state cohorts."
 
 [metadata]
-author_name = "Replace with author name"
-author_email = "replace@example.com"
-author_organization = "Replace with organization"
+author_name = "TODO: author name"
+author_email = "skharkar2020@gmail.com"
+author_organization = "TODO: organization"
 category = "scientific-computing"
-tags = ["scientific-computing", "data-analysis", "python", "pytest"]
-expert_time_estimate_hours = 4.0 # Replace
+tags = ["scientific-computing", "data-analysis", "python", "pytest", "pharmacokinetics", "pharmacodynamics"]
+expert_time_estimate_hours = 4.0 # TODO: confirm; my draft estimate for a clinical pharmacologist to compute per-subject AUC, check exposure-response evidence across both dosing regimens, and write up the nomination
 
-difficulty_explanation = "Replace this with a concrete explanation of the scientific bottleneck, the realistic data challenge, the practitioner who performs the work, and why the task requires expert judgment rather than a recipe-to-code translation."
-solution_explanation = "Replace this with a high-level summary of the reference solution's actual computational strategy and the key scientific insights it uses; do not describe an implementation that is not present in solution/."
-verification_explanation = "Replace this with an evidence-based description of the verifier's executable scientific checks and a calibration rationale for every tolerance, range, or inequality. The starter verifier independently recomputes summary statistics from a fixture only to smoke-test the scaffold."
+difficulty_explanation = "A clinical pharmacologist selecting an exposure-response biomarker from early-phase PK/PD data must distinguish a genuine pharmacodynamic driver from a confounded decoy: in the single-dose cohort a hidden per-subject covariate makes M2's exposure track PD almost as well as the true driver, M1. Trusting a single cohort, or pooling both dosing regimens before correlating, does not reliably separate the two. The task requires recognizing that the data spans two dosing regimens (single dose vs. repeated dosing to steady state), computing a defensible per-subject exposure estimate from sparse concentration-time samples, and checking which candidate's exposure-response relationship survives across both regimens rather than trusting the regimen where it looks strongest at first glance."
+solution_explanation = "The reference solution computes each subject's per-analyte exposure (AUC) via the trapezoidal rule over the visible sparse concentration-time samples, splits subjects by actual dosing regimen (n_doses == 1 vs. n_doses > 1, not the cohort label string), computes each candidate's Pearson correlation between AUC and PD response separately within each regimen, and nominates the species whose association is strongest in the multi-dose steady-state regimen, since that regimen gives each subject a more stable exposure estimate and single-dose-specific confounds are less likely to persist."
+verification_explanation = "The verifier independently recomputes the same AUC/correlation pipeline from its own copy of the data and checks: (1) result.json has exactly the required keys, a nominated species from the valid set, and finite association values in [-1, 1]; (2) the nominated species' recomputed multi-dose association exceeds every other candidate's own recomputed value by at least 0.04 -- a relative-dominance margin set below the ~0.06-0.11 margin observed across independent seeds during authoring, so it tolerates a reasonable alternative AUC methodology while still rejecting a wrong nomination; (3) the agent's reported single_dose_association and multi_dose_association for the nominated species are within 0.20 of the verifier's independent recomputation, to catch fabricated or copy-pasted numbers."
 
 [verifier]
 timeout_sec = 300.0

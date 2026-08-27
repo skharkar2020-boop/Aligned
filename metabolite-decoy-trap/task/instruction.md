@@ -1,15 +1,49 @@
-<!-- TEMPLATE ONLY: replace this contract before running a benchmark campaign. -->
+# Cpd-7 exposure-response species nomination
 
-# Replace with the scientific task title
+Cpd-7 is a small-molecule drug candidate metabolized in humans to two
+circulating species, M1 and M2, alongside the unchanged parent compound. The
+clinical pharmacology team needs to select a single exposure-response
+biomarker for dose selection in later trials: the one species among parent,
+M1, and M2 whose systemic exposure genuinely explains the observed
+pharmacodynamic (PD) response.
 
-Replace this paragraph with a concise statement of the real research objective. Name the decision the result supports, but do not prescribe a reference implementation or an ordered recipe.
+Nominate the species (`parent`, `M1`, or `M2`) whose exposure-response
+relationship is best supported by the available evidence, and report how
+strong that relationship is.
 
-The task inputs are available under `/workspace/data`. Replace this sentence with the absolute path, format, units, dimensions, and scientifically relevant fields for each public input. If an input is generated, describe the generated artifact and keep its deterministic generator in `environment/`.
+## Data
 
-Produce the required deliverables under `/workspace/output`. This starter contract uses the following smoke outputs; replace the filenames and schema with the actual scientific output contract:
+The task inputs are available under `/workspace/data`:
 
-- `/workspace/output/result.json`: a JSON object with exactly `n_observations`, `mean_value`, `std_value`, `minimum`, and `maximum`.
+- `pk_concentrations.csv`: sparse, noised pharmacokinetic concentration-time
+  samples. Columns: `subject_id`, `cohort`, `time_hr` (hours post first
+  dose), `analyte` (`parent`, `M1`, or `M2`), `conc_ng_ml` (plasma
+  concentration, ng/mL).
+- `pd_response.csv`: one pharmacodynamic response measurement per subject.
+  Columns: `subject_id`, `cohort`, `response`.
+- `subjects.csv`: per-subject dosing record. Columns: `subject_id`,
+  `cohort`, `dose_mg`, `n_doses` (number of doses administered before PK
+  sampling), `tau_hr` (dosing interval in hours, where repeated dosing
+  applies).
 
-For the starter smoke contract, `result.json` summarizes the numeric `value` column in `/workspace/data/input.csv` using finite numbers and a population standard deviation. A finished task should instead state the domain-specific definitions, units, constraints, and exact structured-output schema that its verifier checks.
+All three files share `subject_id` as the join key.
 
-Do not hardcode expected output values. Keep all final files under `/workspace/output` and make the computation reproducible from the visible inputs.
+## Deliverable
+
+Produce `/workspace/output/result.json`, a JSON object with exactly these
+keys:
+
+- `nominated_species`: one of `"parent"`, `"M1"`, `"M2"` — the species you
+  nominate as the true PD driver.
+- `single_dose_association`: a finite number in `[-1, 1]` quantifying the
+  strength of the nominated species' exposure-response relationship among
+  subjects who received a single dose.
+- `multi_dose_association`: a finite number in `[-1, 1]` quantifying that
+  same relationship among subjects who received repeated dosing to steady
+  state.
+
+Both association values must be genuinely derived from the visible data for
+your nominated species, not hardcoded and not copied from a different
+candidate. Read `DATA_DIR`/`OUTPUT_DIR` from the environment rather than
+assuming the paths above. Make the computation reproducible from the visible
+inputs.
