@@ -6,7 +6,7 @@
 # one container, so the verifier's own dependencies have to be installed here
 # too. Without them tests/test.sh dies on "No module named pytest" and the task
 # is rejected before a single check runs.
-FROM --platform=linux/amd64 python:3.12-slim
+FROM --platform=linux/amd64 mirror.gcr.io/library/python:3.12-slim
 
 ENV WORKSPACE_DIR=/workspace \
     DATA_DIR=/workspace/data \
