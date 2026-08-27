@@ -2,10 +2,11 @@
 # hidden truth, or expected outputs into this image.
 #
 # This is the ONLY image the Gemini Data Collection (Nexus) sandbox runs. It
-# ignores [verifier].environment_mode and executes the agent and the verifier in
-# one container, so the verifier's own dependencies have to be installed here
-# too. Without them tests/test.sh dies on "No module named pytest" and the task
-# is rejected before a single check runs.
+# ignores [verifier].environment_mode and executes the agent and the verifier
+# in one container. The verifier (tests/test_outputs.py) is a plain script
+# with no test-framework dependency, so its only requirements are numpy,
+# pandas, and scipy -- the same libraries the analysis itself legitimately
+# needs -- and there is nothing test-only left to install here.
 #
 # python:3.11 (not 3.12) is deliberate: the pinned pandas==1.5.3 in
 # wheels/requirements.txt has no cp312 wheel on PyPI, and that pin is part of
@@ -23,14 +24,13 @@ ENV WORKSPACE_DIR=/workspace \
 # Keep this literal so remote exec calls use the real container directory.
 WORKDIR /workspace
 
-# wheels/ carries both the solution's runtime dependencies (numpy, pandas,
-# scipy -- pinned to the pipeline's as-shipped versions) and the verifier's
-# dependencies (pytest, the CTRF reporter, and their transitive deps). Keep
-# it in step with tests/wheels/: the sandbox is air-gapped at build time, so
-# anything solve.py or test.sh imports must be baked in here, with no index
-# contacted. Installing under /opt rather than /tmp is deliberate -- the
-# runtime overlays /tmp with an empty tmpfs and would erase anything left
-# there during the build.
+# wheels/ carries numpy, pandas, and scipy, pinned to the pipeline's
+# as-shipped versions -- both solve.py and the pytest-free test_outputs.py
+# import only these. Keep it in step with tests/wheels/: the sandbox is
+# air-gapped at build time, so anything either script imports must be baked
+# in here, with no index contacted. Installing under /opt rather than /tmp
+# is deliberate -- the runtime overlays /tmp with an empty tmpfs and would
+# erase anything left there during the build.
 COPY wheels/ /opt/wheels/
 
 RUN python -m pip install --no-cache-dir --no-index \

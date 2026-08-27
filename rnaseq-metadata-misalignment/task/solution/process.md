@@ -47,6 +47,19 @@ before joining, rather than joining on the literal `sample_id` string, will
 merge these two into one and silently corrupt the analysis in the same
 undetectable way as the original bug.
 
+Fixing the alignment is necessary but not sufficient. `sample_02` is also
+the sole member of `batch` `batch2`; every other sample is `batch1`. A
+batch with exactly one sample is perfectly confounded with itself: nothing
+in the data can separate "this is a real biological effect in this sample"
+from "this is a technical artifact of processing it differently," because
+there is no second batch2 sample to compare it against. The scientifically
+defensible move is to run the differential-expression comparison on the
+samples from batches large enough to support that distinction -- here, the
+12 batch1 samples -- while still verifying `sample_02`'s identity like any
+other sample. Running the comparison on all 13 without accounting for this
+produces a different, still non-crashing, still nominally significant top
+gene: not an error, a wrong answer that happens to look complete.
+
 ## Steps
 
 1. Run `python -m pipeline.run_pipeline` (or equivalent) against
@@ -71,19 +84,28 @@ undetectable way as the original bug.
    or an explicit ID-keyed merge), never by resetting both to a positional
    index first. Keep `sample_2` and `sample_02` as the two distinct IDs they
    are; do not normalize, fuzzy-match, or deduplicate sample identifiers.
-5. Recompute log2(CPM + 1) per sample and run the pipeline's own
-   differential-expression step (Welch's t-test per gene, treated vs.
-   control, Benjamini-Hochberg FDR correction) on the correctly joined
-   table. Take the gene with the smallest adjusted p-value as the top hit.
-6. Before reporting, explicitly count how many of the 13 samples have their
+5. Before reporting, explicitly count how many of the 13 samples have their
    expression-matrix identity and metadata `sample_id` confirmed equal at
    the row used in the analysis (not just that the row counts match) and
    report that count alongside the result. A pipeline that is really
    joining by ID gets all 13; a pipeline still joining by position, however
-   it was patched, will not.
-7. Write `result.json` with the top gene's symbol, its log2 fold-change
+   it was patched, will not. This count is independent of step 6 below --
+   every sample gets ID-verified regardless of whether it ends up usable
+   for the statistical comparison.
+6. Check each sample's `batch`. `sample_02` is the only member of its
+   batch; a batch of one cannot be separated from a real condition effect.
+   Exclude it from the differential-expression comparison for that reason
+   (not because its ID is ambiguous -- it already passed step 5) and use
+   the 12 batch1 samples for the comparison itself.
+7. Recompute log2(CPM + 1) per sample and run the pipeline's own
+   differential-expression step (Welch's t-test per gene, treated vs.
+   control, Benjamini-Hochberg FDR correction) on the correctly joined,
+   batch-filtered table. Take the gene with the smallest adjusted p-value
+   as the top hit.
+8. Write `result.json` with the top gene's symbol, its log2 fold-change
    (treated vs. control), its BH-adjusted p-value, and the verified sample
-   count, using `DATA_DIR`/`OUTPUT_DIR`.
+   count (13, from step 5 -- not the 12 used in step 7), using
+   `DATA_DIR`/`OUTPUT_DIR`.
 
 ## Validation performed
 
@@ -94,12 +116,26 @@ incidentally correct for one pandas version's default behavior. The
 reference result was cross-checked against an independent, from-scratch
 recomputation (same CPM/t-test/BH procedure, implemented separately from
 the pipeline module) that joins on `sample_id` directly from the two raw
-input files; the two agree exactly. Two smaller alignment mistakes were
-run against the same data as an internal check that the verifier and
-result would actually catch them: dropping `sample_02` as a perceived
-duplicate of `sample_2` changes the reported log2 fold-change/p-value and
-reports only 12 verified samples instead of 13; mislabeling `sample_02`'s
-condition (the failure mode of matching it to `sample_2`'s metadata row)
-is enough on its own, at this sample size, to knock the true top gene out
-of first place. Both are visibly different from the locked reference
-values.
+input files and applies the same batch filter; the two agree exactly.
+
+Several wrong-but-plausible scenarios were run against the same data as an
+internal check that the verifier would actually catch them, none of which
+crash or produce a NaN:
+- Both misalignment branches (pandas<2 and pandas>=2, after only fixing the
+  crash) land on two different null genes, neither statistically
+  significant.
+- Dropping `sample_02` as a perceived duplicate of `sample_2` reports only
+  12 verified samples instead of 13.
+- Mislabeling `sample_02`'s condition (the failure mode of matching it to
+  `sample_2`'s metadata row) knocks the true top gene out of first place
+  entirely, with nothing reaching significance.
+- Running the comparison on all 13 correctly-ID-verified samples --
+  correct alignment, but without the batch-2 exclusion -- reports a
+  *different* gene as top, at an adjusted p-value (~1e-3) that clears an
+  unwary "is it significant" check on its own. This is the closest wrong
+  answer to correct: everything about it is internally consistent except
+  the batch judgment, and it is deliberately calibrated to be a confident,
+  plausible-looking wrong answer rather than an obviously broken one.
+
+All are visibly different from the locked reference values on at least one
+checked field.

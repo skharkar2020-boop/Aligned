@@ -38,6 +38,19 @@ sample_id explicitly, never by position, and to keep sample_02 and sample_2
 or a duplicate) as the two distinct samples they are: a normalize-and-match
 scheme that treats them as the same ID drops one sample or silently
 mislabels the other's condition, either of which changes the answer.
+
+Fixing the alignment is necessary but not sufficient. sample_02 is the only
+member of `batch2`; every other sample is `batch1`. A batch with one sample
+cannot be distinguished from a real biological effect by any statistical
+procedure -- there is no second batch2 observation to compare it against,
+so nothing separates "this is how batch2 samples look" from "this is how
+this one sample happens to look." The defensible choice is to run the
+differential-expression comparison on the samples from batches large enough
+to support that distinction (here, the 12 batch1 samples), while still
+verifying every sample's identity, including sample_02's. Skipping this and
+running the comparison on all 13 samples produces a different, still
+plausible-looking, still nominally significant top gene -- not an error, a
+wrong answer.
 """
 
 from __future__ import annotations
@@ -71,14 +84,28 @@ def main() -> None:
     counts_ordered = expr[ordered_ids]
 
     # Explicit, per-sample identity check -- the diagnostic the shipped
-    # pipeline's shape-only assertion never actually performed.
+    # pipeline's shape-only assertion never actually performed. Every
+    # sample is ID-verified regardless of whether it ends up usable for
+    # the statistical comparison below.
     verified_matching_sample_ids = sum(
         1
         for sid, col in zip(ordered_ids, counts_ordered.columns)
         if sid == col and sid in set(metadata["sample_id"])
     )
 
-    condition = pd.Series(metadata["condition"].to_numpy(), index=ordered_ids)
+    # Batch-confound check: a batch with fewer than 2 samples cannot be
+    # distinguished from a real biological effect, so it is excluded from
+    # the comparison (not from ID verification above).
+    batch_sizes = metadata.groupby("batch")["sample_id"].transform("count")
+    comparable = metadata.loc[batch_sizes >= 2, "sample_id"].tolist()
+    excluded = sorted(set(ordered_ids) - set(comparable))
+    if excluded:
+        print(f"Excluding single-sample batch(es) from the comparison: {excluded}")
+
+    counts_ordered = counts_ordered[comparable]
+    condition = pd.Series(
+        metadata.set_index("sample_id").loc[comparable, "condition"].to_numpy(), index=comparable
+    )
 
     log2cpm = pipeline_stats.compute_log2_cpm(counts_ordered)
     de_table = pipeline_stats.differential_expression(log2cpm, condition)

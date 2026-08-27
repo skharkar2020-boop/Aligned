@@ -1,21 +1,18 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# This task's verifier (test_outputs.py) is a dependency-free plain script,
+# not pytest -- see task/README.md's "task-review findings" section for why
+# (environment_hygiene: no test-only deps baked into environment/Dockerfile).
+
 TESTS_DIR="${TESTS_DIR:-/tests}"
 LOG_DIR="${LOG_DIR:-/logs/verifier}"
-CTRF_PATH="${LOG_DIR}/ctrf.json"
-PYTEST_LOG="${LOG_DIR}/pytest.log"
+TEST_LOG="${LOG_DIR}/test_outputs.log"
 REWARD_PATH="${LOG_DIR}/reward.txt"
 
 mkdir -p "${LOG_DIR}"
 
-if python3 -m pytest --help 2>/dev/null | grep -q -- "--ctrf"; then
-    python3 -m pytest --ctrf "${CTRF_PATH}" "${TESTS_DIR}/test_outputs.py" -rA \
-        2>&1 | tee "${PYTEST_LOG}"
-else
-    python3 -m pytest "${TESTS_DIR}/test_outputs.py" -rA \
-        2>&1 | tee "${PYTEST_LOG}"
-fi
+python3 "${TESTS_DIR}/test_outputs.py" 2>&1 | tee "${TEST_LOG}"
 status=${PIPESTATUS[0]}
 
 if [ "${status}" -eq 0 ]; then

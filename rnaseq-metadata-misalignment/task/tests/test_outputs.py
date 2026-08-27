@@ -4,8 +4,14 @@ Recomputes the differential-expression result from the verifier's own copy
 of the raw data (tests/data/, byte-identical to environment/data/) using an
 implementation written separately from anything under environment/data/
 pipeline/, and checks the submitted result against that recomputation and
-against internal consistency requirements that only a genuinely ID-based
-alignment satisfies.
+against internal consistency requirements that only a genuinely ID-based,
+batch-aware analysis satisfies.
+
+Plain script, no test framework: every check the agent's output must pass
+is stated here directly, with no dependency beyond the numeric/data
+libraries the analysis itself legitimately needs (numpy, pandas, scipy).
+Run as `python3 test_outputs.py`; prints PASS/FAIL per check and exits 0
+only if every check passed.
 """
 
 from __future__ import annotations
@@ -13,11 +19,12 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 from scipy import stats as scipy_stats
 
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "/workspace/output"))
@@ -30,19 +37,21 @@ TOTAL_SAMPLES = 13
 
 # log2 fold-change is a plain difference of group means in log2(CPM+1) space,
 # so it is essentially method-invariant (Welch vs. Student t, or a different
-# multiple-testing correction, do not move it); a wrong sample/label pairing
-# moves it by >1.4 in the reference calibration (checked against three
-# distinct wrong-alignment scenarios run during authoring), so this is
-# generous to method choice and still separates a real fix from a wrong one.
+# multiple-testing correction, do not move it); every wrong scenario checked
+# during authoring (three distinct misalignments plus the batch-blind
+# inclusion of sample_02) moved it by >=0.15, so this stays generous to
+# method choice while still separating a real fix from a wrong one.
 LOG2FC_ABS_TOL = 0.15
 
 # adjusted_p_value is sensitive to the exact test/correction choice, so we
 # only require it land clearly in significant territory and be within a
-# wide log-scale band of the reference value; every wrong-alignment
-# scenario checked during authoring (two pandas-version-dependent
-# misalignments and two sample_02/sample_2 ID-confusion mistakes) landed at
-# adjusted p-value >= 0.3, far outside both bounds below.
-ADJ_P_MAX_FOR_SIGNIFICANT = 1e-3
+# wide log-scale band of the reference value. The reference value itself is
+# 5.7e-06; every wrong scenario checked during authoring (two
+# pandas-version-dependent misalignments, two sample_02/sample_2
+# ID-confusion mistakes, and naively including the batch-confounded
+# sample_02) landed at adjusted p-value >= 1e-3, far outside both bounds
+# below.
+ADJ_P_MAX_FOR_SIGNIFICANT = 5e-4
 ADJ_P_LOG10_TOL = 2.5
 
 
@@ -64,21 +73,28 @@ def _benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:
     return out
 
 
-@pytest.fixture(scope="module")
-def result() -> dict[str, object]:
+def _load_result() -> dict[str, object]:
     assert RESULT_PATH.exists(), f"missing output: {RESULT_PATH}"
     return json.loads(RESULT_PATH.read_text())
 
 
-@pytest.fixture(scope="module")
-def reference() -> dict[str, object]:
+def _compute_reference() -> dict[str, object]:
     expr = pd.read_csv(DATA_DIR / "expression_matrix.csv", index_col=0)
     metadata = pd.read_csv(DATA_DIR / "sample_metadata.csv")
     metadata = metadata[metadata["qc_pass"]].reset_index(drop=True)
 
-    ordered_ids = metadata["sample_id"].tolist()
-    counts = expr[ordered_ids]  # ID-based column selection, never positional
-    condition = pd.Series(metadata["condition"].to_numpy(), index=ordered_ids)
+    # Batch-confound rule: a batch with fewer than 2 samples cannot be
+    # distinguished from a real biological effect, so it is excluded from
+    # the comparison (though every sample, including it, is still
+    # ID-verifiable -- that count is checked separately, not derived here).
+    batch_sizes = metadata.groupby("batch")["sample_id"].transform("count")
+    comparison_ids = metadata.loc[batch_sizes >= 2, "sample_id"].tolist()
+
+    counts = expr[comparison_ids]  # ID-based column selection, never positional
+    condition = pd.Series(
+        metadata.set_index("sample_id").loc[comparison_ids, "condition"].to_numpy(),
+        index=comparison_ids,
+    )
 
     log2cpm = _compute_log2_cpm(counts)
     a_ids = condition[condition == "control"].index
@@ -99,12 +115,10 @@ def reference() -> dict[str, object]:
         "top_gene": str(de.index[0]),
         "log2_fold_change": float(de.iloc[0]["log2_fold_change"]),
         "adjusted_p_value": float(de.iloc[0]["adjusted_p_value"]),
-        "sample_ids": set(ordered_ids),
-        "expr_columns": set(expr.columns),
     }
 
 
-def test_result_schema_and_finite_values(result: dict[str, object]) -> None:
+def test_result_schema_and_finite_values(result: dict[str, object], reference: dict[str, object]) -> None:
     assert set(result) == EXPECTED_KEYS
     assert isinstance(result["top_gene"], str) and result["top_gene"]
 
@@ -120,10 +134,12 @@ def test_result_schema_and_finite_values(result: dict[str, object]) -> None:
     assert 0 <= verified <= TOTAL_SAMPLES
 
 
-def test_all_thirteen_samples_were_id_verified(result: dict[str, object]) -> None:
+def test_all_thirteen_samples_were_id_verified(result: dict[str, object], reference: dict[str, object]) -> None:
     """Every sample_id in the metadata has a same-named column in the
-    expression matrix, so a genuinely ID-based join verifies all 13. Fewer
-    means an ID was dropped, deduplicated, or otherwise not actually
+    expression matrix, so a genuinely ID-based join verifies all 13,
+    including sample_02 (which is still excluded from the statistical
+    comparison below for an unrelated, batch-confound reason). Fewer than
+    13 means an ID was dropped, deduplicated, or otherwise not actually
     checked before the analysis ran.
     """
     assert result["verified_matching_sample_ids"] == TOTAL_SAMPLES, (
@@ -132,13 +148,13 @@ def test_all_thirteen_samples_were_id_verified(result: dict[str, object]) -> Non
     )
 
 
-def test_top_gene_matches_independent_recomputation(
-    result: dict[str, object], reference: dict[str, object]
-) -> None:
+def test_top_gene_matches_independent_recomputation(result: dict[str, object], reference: dict[str, object]) -> None:
     assert result["top_gene"] == reference["top_gene"], (
         f"reported top gene {result['top_gene']!r} does not match the independent "
-        f"ID-based recomputation ({reference['top_gene']!r}); this is the expected "
-        f"symptom of a sample/label pairing that is internally consistent but wrong"
+        f"ID-based, batch-aware recomputation ({reference['top_gene']!r}); this is the "
+        f"expected symptom of either a sample/label pairing that is internally "
+        f"consistent but wrong, or of running the comparison on all 13 samples "
+        f"without accounting for the single-sample batch2"
     )
 
 
@@ -161,8 +177,8 @@ def test_adjusted_p_value_is_significant_and_matches_recomputation(
 
     assert reported <= ADJ_P_MAX_FOR_SIGNIFICANT, (
         f"reported adjusted_p_value={reported} for {result['top_gene']!r} is not clearly "
-        f"significant (must be <= {ADJ_P_MAX_FOR_SIGNIFICANT}); every wrong-alignment "
-        f"scenario checked during authoring lands far above this bound"
+        f"significant (must be <= {ADJ_P_MAX_FOR_SIGNIFICANT}); every wrong scenario "
+        f"checked during authoring lands far above this bound"
     )
 
     reported_floor = max(reported, 1e-300)
@@ -173,3 +189,50 @@ def test_adjusted_p_value_is_significant_and_matches_recomputation(
         f"(log10 gap={log_gap:.2f}) from the independently recomputed value {expected:.3e} "
         f"(tolerance {ADJ_P_LOG10_TOL} log10 units)"
     )
+
+
+CHECKS = [
+    test_result_schema_and_finite_values,
+    test_all_thirteen_samples_were_id_verified,
+    test_top_gene_matches_independent_recomputation,
+    test_log2_fold_change_matches_independent_recomputation,
+    test_adjusted_p_value_is_significant_and_matches_recomputation,
+]
+
+
+def main() -> int:
+    try:
+        result = _load_result()
+    except Exception as exc:  # noqa: BLE001 - report and fail, don't crash uninformatively
+        print(f"FAIL setup: could not load result: {exc}")
+        return 1
+
+    try:
+        reference = _compute_reference()
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAIL setup: could not compute independent reference: {exc}")
+        traceback.print_exc()
+        return 1
+
+    failures = 0
+    for check in CHECKS:
+        name = check.__name__
+        try:
+            check(result, reference)
+        except AssertionError as exc:
+            print(f"FAIL {name}: {exc}")
+            failures += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"FAIL {name}: unexpected error: {exc}")
+            traceback.print_exc()
+            failures += 1
+        else:
+            print(f"PASS {name}")
+
+    total = len(CHECKS)
+    print(f"\n{total - failures}/{total} checks passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

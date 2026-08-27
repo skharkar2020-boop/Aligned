@@ -9,7 +9,7 @@ via a SHA256-based `stable_seed`, not Python's `hash()`, so the script
 reproduces byte-identical output across runs and processes). That script
 also writes `../data_generation/private/ground_truth.json`, an
 authoring-only file carrying the full 300-gene ranked DE table computed
-from the correct, ID-based alignment; it is **not** copied into
+from the correct, ID-based, batch-aware analysis; it is **not** copied into
 `environment/data/`, `tests/data/`, or either Docker build context, and
 must never be.
 
@@ -18,9 +18,10 @@ is hand-written, not generated, and is public/agent-visible by design.
 
 ## Bug-layer design and empirical verification
 
-Three compounding bugs are baked into `environment/data/pipeline/`, plus
-two additional difficulty layers, per the authoring brief. All of the
-following was verified by actually running the pipeline under two real,
+Three compounding bugs are baked into `environment/data/pipeline/`, plus a
+batch-confound judgment that the pipeline never handles at all, and two
+additional difficulty layers, per the authoring brief. All of the following
+was verified by actually running the pipeline under two real,
 separately-installed dependency sets, not by inspection:
 
 1. **Warm-up crash** (`pipeline/io.py`): `counts.astype(np.float)`. Verified
@@ -42,67 +43,123 @@ separately-installed dependency sets, not by inspection:
    pandas<2 branch's pairing vs. 5/13 under the pandas>=2 branch's pairing,
    for the shipped dataset), so "upgrading" pandas after fixing the crash
    changes the wrong answer rather than fixing it.
+4. **Batch confound, never handled by the pipeline** (data-level, not a
+   pipeline bug): `sample_02` is the sole member of `batch2`; every other
+   sample is `batch1`. A single-sample batch cannot be statistically
+   distinguished from a real biological effect. `sample_02`'s `TRUE_TOP`
+   count carries a deliberate, calibrated technical-artifact scale-down
+   (`BATCH2_ARTIFACT_FACTOR = 0.15` in `generate_data.py`) that lands it
+   within the *control* group's own `TRUE_TOP` range (569, vs. controls'
+   507-743) -- statistically invisible as an outlier on its own, but strong
+   enough that naively including `sample_02` in the treated group changes
+   which gene comes out on top. Excluding the confounded singleton batch
+   (the defensible move: fixing alignment is necessary but not sufficient)
+   recovers the correct answer and is completely unaffected by the
+   artifact's magnitude, since `sample_02`'s data never enters that
+   comparison. The flip boundary between "still recovers TRUE_TOP" and
+   "flips to a different top gene" was swept empirically and falls between
+   factor 0.32 and 0.35; 0.15 keeps a comfortable margin on the wrong side
+   of it. This was added after `task-review` flagged the task as closer to
+   "locate straightforward defects" than to something requiring genuine
+   domain expertise -- see "task-review findings" below.
 
 Difficulty layer A (ambiguous IDs): sample roster is 6 control
 (`sample_1`-`sample_6`) + 7 treated (`sample_7`-`sample_12`, `sample_02`).
 `sample_2` and `sample_02` are two real, independent samples (batch1 vs. a
 later-arriving batch2 with a zero-padded ID convention), deliberately
 assigned *opposite* conditions (`sample_2` control, `sample_02` treated) so
-that confusing the two is not a no-op -- confirmed load-bearing in scenario
-4 below. An earlier draft had both `control`; under that version confusing
-the two IDs was harmless and the layer-A red herring had no teeth, which is
-why the condition assignment was flipped. Layer B (misleading assertion):
+that confusing the two is not a no-op. Layer B (misleading assertion):
 `run_pipeline.py`'s `assert combined.shape[0] == metadata.shape[0]` is
 real, present, and passes in every misaligned scenario tested below -- it
 only checks row *count*. Layer C (near-miss genes): `DECOY_A`/`DECOY_B` are
 designed to sit close enough to `TRUE_TOP` that a near-correct alignment
-can promote either of them. Layer D: `verified_matching_sample_ids` is not
-part of the shipped pipeline's output at all; it must be added by whoever
-fixes it.
+can promote either of them -- and, as of the batch-confound addition,
+`DECOY_B` specifically is what a batch-blind but otherwise-correct analysis
+lands on. Layer D: `verified_matching_sample_ids` is not part of the
+shipped pipeline's output at all; it must be added by whoever fixes it, and
+now has to stay correct (13) independently of the batch decision, which
+changes the *comparison* sample count (12) without changing the
+*verification* count.
 
 ### Calibration record (n_genes=300, n_samples=13; TRUE_TOP log2FC=2.6/sigma=0.15,
 ### DECOY_A log2FC=2.3/sigma=0.30, DECOY_B log2FC=2.2/sigma=0.30, baseline
-### null genes log2FC=0)
+### null genes log2FC=0; BATCH2_ARTIFACT_FACTOR=0.15 on sample_02's TRUE_TOP)
 
 All values below are from the actual generated dataset, run through the
 actual shipped/reference code, not hand-derived:
 
 | Scenario | top gene | log2FC | adjusted p | verified_ids | notes |
 |---|---|---|---|---|---|
-| **Correct (ID-based, all 13)** -- locked ground truth | `TRUE_TOP` | 2.2905 | 8.79e-07 | 13 | runner-up `DECOY_B` padj=5.4e-4, `DECOY_A` padj=1.03e-2 -- both nominally significant, clear margin to TRUE_TOP |
+| **Correct (ID-based, batch1-only, 12 of 13 used) -- locked ground truth** | `TRUE_TOP` | 2.2439 | 5.72e-06 | 13 | runner-up `DECOY_B` padj=8.5e-4, `DECOY_A` padj=9.8e-3 -- both nominally significant, clear margin to TRUE_TOP; verified count stays 13 even though only 12 feed the comparison |
 | As shipped | -- | -- | -- | -- | crashes on `np.float` before producing any output |
-| Fix only `np.float`, pandas stays 1.5.3 (branch A) | `NFAT890` (null gene) | 0.799 | 0.811 | -- | designed genes buried (ranks 15/17/59), nothing reaches significance |
+| Fix only `np.float`, pandas stays 1.5.3 (branch A) | `NFAT890` (null gene) | 0.799 | 0.811 | -- | designed genes buried, nothing reaches significance |
 | Same, pandas upgraded to 2.2.3 (branch B) | `ZNF621` (null gene) | 0.712 | 0.892 | -- | different top gene, different values, still nothing significant |
-| Naive dedup: drop `sample_02` as a perceived duplicate (12 samples) | `TRUE_TOP` (right gene, wrong stats) | 2.244 | 5.72e-06 | 12 | top_gene coincidentally correct; log2FC/padj drift outside verifier tolerance, and the sample-count diagnostic alone fails this |
-| ID confusion: `sample_02` mislabeled with `sample_2`'s condition (13 samples, 1 wrong label) | `DECOY_A` | 1.884 | 0.383 | 13 | one flipped label is enough at this n to both fail significance and change which gene ranks first -- diagnostic count alone does not catch this one, the top_gene/log2FC/padj checks do |
+| Naive dedup: drop `sample_02` as a perceived duplicate (12 samples) | `TRUE_TOP` (right gene, coincidentally close stats) | ~2.244 | ~5.7e-06 | 12 | numerically close to/matching the correct answer (both use the same 12 batch1 samples) -- this is the case the verified-count check exists specifically to catch, since nothing else distinguishes it from a batch-aware fix |
+| ID confusion: `sample_02` mislabeled with `sample_2`'s condition (13 samples, 1 wrong label) | `DECOY_A` | 1.884 | 0.383 | 13 | one flipped label is enough at this n to both fail significance and change which gene ranks first |
+| Correct alignment, all 13 samples, no batch exclusion (batch-blind) | `DECOY_B` | 2.094 | 1.04e-03 | 13 | the closest wrong answer to correct: alignment is genuinely right, verified count is genuinely 13, and the result is confidently significant -- only the batch judgment is missing |
 
-Every wrong scenario fails at least one verifier check; the "drop
-`sample_02`" and "mislabel `sample_02`" rows are deliberately the two
-closest-to-passing failures (matching or near-matching on some fields) to
-confirm the verifier's checks are each independently load-bearing rather
-than redundant.
+Every wrong scenario fails at least one verifier check. The "drop
+`sample_02`" and "batch-blind" rows are deliberately the two
+closest-to-passing failures (batch-blind gets alignment, count, and
+significance all "right" -- just not the batch decision; drop-as-duplicate
+gets the DE numbers right by relying on the same 12 samples for the wrong
+reason) to confirm the verifier's checks are each independently
+load-bearing rather than redundant: `top_gene`/`log2_fold_change`/
+`adjusted_p_value` catch batch-blindness, `verified_matching_sample_ids`
+catches the naive-dedup case that the other three fields cannot.
 
 Re-run the generator to reproduce: `python3 data_generation/generate_data.py`
 from the project root writes `data_generation/public/*.csv` (copy into
 `environment/data/` and `tests/data/`) and
 `data_generation/private/ground_truth.json` (authoring-only, never ships).
 
+## task-review findings (first pass) and how they were addressed
+
+The first `task-review` pass (before the batch-confound addition) returned
+`Fail` with four findings:
+
+1. **`difficult`** -- the task read as "locate straightforward defects in a
+   small pipeline" rather than requiring genuine domain expertise. Addressed
+   by adding the batch-confound judgment (layer 4 above): recognizing that a
+   single-sample batch cannot be statistically corrected for, and deciding
+   to exclude it from the comparison while still verifying its identity, is
+   real, professionally-relevant RNA-seq/experimental-design knowledge, not
+   a code-reading exercise. `drug_discovery_pipeline.md` section 8a ("Data /
+   ML / infrastructure") also lists "fix a broken analysis pipeline and
+   reproduce a previously reported number" as a representative task for
+   this category -- `task.toml`'s `category`/`tags` were updated to reflect
+   that classification instead of the stage-1 target-ID framing the
+   placeholder tags implied.
+2. **`environment_hygiene`** -- pytest/pytest-json-ctrf were baked into
+   `environment/Dockerfile` alongside the runtime deps. Addressed by
+   rewriting `tests/test_outputs.py` as a plain script with no
+   test-framework dependency (still numpy/pandas/scipy, which the analysis
+   itself legitimately needs) and updating `test.sh` to run it directly;
+   pytest is no longer vendored anywhere in this task.
+3. **`verification_explanation_quality`** -- needed a statement that
+   tolerances were checked against an alternative correct method, not only
+   against wrong-alignment scenarios. Addressed in the author-drafted
+   `verification_explanation`.
+4. **`difficulty_explanation_quality`** -- needed a sentence on data realism
+   and who does this work in practice. Addressed in the author-drafted
+   `difficulty_explanation`.
+
+`task-fixer`/`task-review` have not yet been re-run against the
+batch-confound version of the task; that is the next step.
+
 ## Open items for the human author
 
-- `instruction.md` and `task.toml`'s hand-authored fields are left as
-  skeletons per this repo's authoring rules -- see the notice at the top of
-  `task/instruction.md` for the fact sheet of what must appear in the final
-  prompt.
-- Docker was not available in the authoring sandbox this task was built in,
-  so `./harbor_runner.py task --no-remote --smoke-test` has not been run.
-  The full solve -> verify flow was instead run against a venv built
-  strictly from `environment/wheels/` (offline, `--no-index`), which
-  exercises the identical dependency set and code paths the container
-  would use, and passed (reward=1). Run the real Docker smoke test before
-  the first `task-fixer`/`task-review` pass.
+- Re-run `./scripts/run-task-fixer.sh task` and
+  `./scripts/run-task-review.sh task` against the current state (batch
+  confound added, verifier now pytest-free, data/ground truth re-locked).
+- Re-run the Docker smoke test (`./harbor_runner.py task --no-remote
+  --smoke-test`) -- the previous pass (before this round of changes) was
+  confirmed green by the human author on their own machine; it has not been
+  re-run since the batch-confound addition, the wheel changes, or the data
+  regeneration. The venv-based equivalent (solve.py against the new data,
+  verified against the new `test_outputs.py`, using only
+  `environment/wheels/`) was re-run here and passes.
 - `task-fixer`, `task-review`, the Harbor campaign, and `trajectory-review`
-  have not been run (they invoke an installed agent CLI and, for the
-  campaign, a Workbench runner token -- neither available in this
-  sandbox). Fresh-agent screening against real Claude Code / Codex /
-  Gemini trials (the step 10 hard gate: every agent must fail at least 2 of
-  4 trials) has not happened yet.
+  full end-to-end run against real Claude Code / Codex / Gemini trials
+  (the step 10 hard gate: every agent must fail at least 2 of 4 trials) has
+  not happened yet.

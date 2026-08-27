@@ -1,12 +1,25 @@
 """Synthetic bulk RNA-seq dataset generator for the compound-response DE task.
 
 Ground truth (never exposed via file/column names in the public data):
-  - 13 samples: 7 vehicle-control, 6 compound-treated.
+  - 13 samples: 6 vehicle-control, 7 compound-treated.
   - Two of the 13 are a genuine near-duplicate ID pair, `sample_2` and
     `sample_02` -- distinct biological replicates from two different
     collection batches (batch1 used unpadded numeric IDs; batch2, added
     later, used zero-padded IDs). Both are real, independent samples with
     their own counts; neither is a copy of the other.
+  - `sample_02` is the sole member of `batch2`. A single-sample batch is
+    perfectly confounded with itself: no statistical procedure can tell a
+    real biological signal in that one sample apart from a batch-specific
+    technical artifact, because there is no second batch2 sample to compare
+    it against. The scientifically defensible choice is to run the primary
+    differential-expression comparison on the balanced, single-batch cohort
+    (the 12 batch1 samples) and treat `sample_02` as informative context,
+    not as a usable data point for the comparison -- while still verifying
+    its identity like any other sample. To make that choice consequential
+    rather than a coin flip, `sample_02`'s TRUE_TOP count carries a real,
+    deliberate batch-specific technical artifact (see BATCH2_ARTIFACT_*
+    below): naively including it without recognizing the confound changes
+    the answer.
   - The expression matrix's sample (column) order is the sequencer
     acquisition order, which is intentionally NOT the metadata table's row
     order: real cores randomize sample-to-lane assignment specifically to
@@ -49,6 +62,18 @@ def stable_seed(*parts) -> int:
     key = "|".join(str(p) for p in parts).encode("utf-8")
     return int(hashlib.sha256(key).hexdigest(), 16) % (2**31)
 
+
+# sample_02 (batch2, n=1) carries a real technical artifact on TRUE_TOP: its
+# count is scaled to BATCH2_ARTIFACT_FACTOR of what the same biological
+# effect + noise draw would otherwise give it. Calibrated (see
+# task/README.md for the sweep) to land within the control group's own
+# TRUE_TOP range -- i.e. it looks like an unremarkable low value, not an
+# outlier -- while being strong enough that naively including sample_02 in
+# the treated group flips the top hit away from TRUE_TOP. The flip boundary
+# was found empirically between factor 0.32 and 0.35; 0.15 keeps a
+# comfortable margin below it.
+BATCH2_ARTIFACT_GENE = "TRUE_TOP"
+BATCH2_ARTIFACT_FACTOR = 0.15
 
 N_GENES = 300
 GENE_PREFIXES = [
@@ -142,34 +167,69 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
             counts[gi, si] = grng.poisson(noisy_mu)
 
     counts_df = pd.DataFrame(counts, index=gene_symbols, columns=sample_ids)
+
+    # Apply the batch2 technical artifact: this only touches sample_02's
+    # stored value for BATCH2_ARTIFACT_GENE, as a deterministic post-hoc
+    # scale -- it does not consume any RNG draws, so it cannot perturb any
+    # other sample's or gene's simulated counts.
+    batch2_ids = metadata.loc[metadata["batch"] != "batch1", "sample_id"].tolist()
+    for sid in batch2_ids:
+        if sid in counts_df.columns:
+            original = counts_df.loc[BATCH2_ARTIFACT_GENE, sid]
+            counts_df.loc[BATCH2_ARTIFACT_GENE, sid] = int(round(original * BATCH2_ARTIFACT_FACTOR))
+
     return counts_df, designed_positions
 
 
-def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
-    """Correct, ID-based analysis: the answer key.
+def batch_confound_free_sample_ids(metadata: pd.DataFrame) -> list[str]:
+    """Sample IDs from batches with >= 2 members.
 
-    Aligns strictly by sample_id (never by row/column position), which is
-    the only thing that is scientifically defensible given that the
-    expression matrix and metadata are independently ordered.
+    A batch effect cannot be distinguished from a real biological effect in
+    a batch with only one sample -- there is nothing within that batch to
+    compare it to. The defensible primary comparison uses only samples from
+    batches large enough to support that distinction.
     """
-    ordered_ids = metadata["sample_id"].tolist()
-    counts_ordered = counts_df[ordered_ids]  # explicit ID-based column selection
-    condition = pd.Series(metadata["condition"].to_numpy(), index=ordered_ids)
+    batch_sizes = metadata.groupby("batch")["sample_id"].transform("count")
+    return metadata.loc[batch_sizes >= 2, "sample_id"].tolist()
+
+
+def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
+    """Correct analysis: the answer key.
+
+    Two independent requirements, both necessary:
+    1. ID-based alignment -- every sample's expression profile is matched to
+       its metadata by sample_id, never by row/column position, since the
+       expression matrix and metadata are independently ordered.
+    2. Batch-confound awareness -- the differential-expression comparison
+       itself only uses samples from batches with >= 2 members, since a
+       single-sample batch cannot be distinguished from a real biological
+       effect. sample_02 (batch2, n=1) is still ID-verified like every other
+       sample; it is excluded from the statistical comparison, not from
+       verification.
+    """
+    all_ids = metadata["sample_id"].tolist()
+    verified_matching_sample_ids = sum(
+        1 for sid in all_ids if sid in counts_df.columns and sid in metadata["sample_id"].to_numpy()
+    )
+
+    comparison_ids = batch_confound_free_sample_ids(metadata)
+    counts_ordered = counts_df[comparison_ids]  # explicit ID-based column selection
+    condition = pd.Series(
+        metadata.set_index("sample_id").loc[comparison_ids, "condition"].to_numpy(), index=comparison_ids
+    )
 
     log2cpm = pipeline_stats.compute_log2_cpm(counts_ordered)
     de_table = pipeline_stats.differential_expression(log2cpm, condition)
     de_table = de_table.sort_values("adjusted_p_value")
 
     top = de_table.iloc[0]
-    verified_matching_sample_ids = sum(
-        1 for sid in ordered_ids if sid in counts_df.columns and sid in metadata["sample_id"].to_numpy()
-    )
 
     return {
         "top_gene": str(de_table.index[0]),
         "log2_fold_change": round(float(top["log2_fold_change"]), 4),
         "adjusted_p_value": float(top["adjusted_p_value"]),
         "verified_matching_sample_ids": int(verified_matching_sample_ids),
+        "comparison_sample_ids": comparison_ids,
         "full_ranked_table": de_table.reset_index().to_dict(orient="records"),
     }
 
