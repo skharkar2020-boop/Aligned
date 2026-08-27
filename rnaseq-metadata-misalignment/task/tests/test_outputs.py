@@ -5,7 +5,7 @@ of the raw data (tests/data/, byte-identical to environment/data/) using an
 implementation written separately from anything under environment/data/
 pipeline/, and checks the submitted result against that recomputation and
 against internal consistency requirements that only a genuinely ID-based,
-batch-aware analysis satisfies.
+batch-aware, variance-moderated analysis satisfies.
 
 Plain script, no test framework: every check the agent's output must pass
 is stated here directly, with no dependency beyond the numeric/data
@@ -46,13 +46,22 @@ LOG2FC_ABS_TOL = 0.15
 # adjusted_p_value is sensitive to the exact test/correction choice, so we
 # only require it land clearly in significant territory and be within a
 # wide log-scale band of the reference value. The reference value itself is
-# 5.7e-06; every wrong scenario checked during authoring (two
-# pandas-version-dependent misalignments, two sample_02/sample_2
-# ID-confusion mistakes, and naively including the batch-confounded
-# sample_02) landed at adjusted p-value >= 1e-3, far outside both bounds
-# below.
+# ~1.0e-06 (with the moderation prior weight below; checked robust from
+# prior weight 2 to 20 during authoring). Every wrong scenario checked
+# during authoring (two pandas-version-dependent misalignments, two
+# sample_02/sample_2 ID-confusion mistakes, naively including the
+# batch-confounded sample_02, and using an unmoderated per-gene test on an
+# otherwise-correct analysis) landed at adjusted p-value >= 1e-3 for
+# whichever gene it reported as top, far outside both bounds below.
 ADJ_P_MAX_FOR_SIGNIFICANT = 5e-4
 ADJ_P_LOG10_TOL = 2.5
+
+# Prior weight (d0) for variance moderation in the reference recomputation --
+# see _moderated_differential_expression. Not the point of the tolerance
+# above: the reference value and the wrong-scenario values were both far
+# enough apart (see comment above) that the exact prior weight barely
+# matters, as long as some real shrinkage is applied.
+MODERATION_PRIOR_WEIGHT = 6.0
 
 
 def _compute_log2_cpm(counts: pd.DataFrame) -> pd.DataFrame:
@@ -71,6 +80,39 @@ def _benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:
     out = np.empty(n)
     out[order] = adjusted
     return out
+
+
+def _moderated_differential_expression(
+    log2cpm: pd.DataFrame, condition: pd.Series, group_a: str = "control", group_b: str = "treated"
+) -> pd.DataFrame:
+    """Per-gene pooled-variance t-test with variance shrunk toward the
+    panel-wide typical value (a simplified limma/eBayes-style moderated
+    t-test). With only 6 samples per group, a plain per-gene variance
+    estimate is itself unreliable enough that a null gene with a by-chance
+    tight variance can outrank a real effect; moderation corrects for that.
+    Written independently of anything under environment/data/pipeline/ or
+    solution/solve.py.
+    """
+    a = log2cpm[condition[condition == group_a].index].to_numpy(dtype=float)
+    b = log2cpm[condition[condition == group_b].index].to_numpy(dtype=float)
+    n1, n2 = a.shape[1], b.shape[1]
+    residual_df = n1 + n2 - 2
+
+    pooled_var = ((n1 - 1) * a.var(axis=1, ddof=1) + (n2 - 1) * b.var(axis=1, ddof=1)) / residual_df
+    prior_var = float(np.median(pooled_var))
+    shrunk_var = (MODERATION_PRIOR_WEIGHT * prior_var + residual_df * pooled_var) / (
+        MODERATION_PRIOR_WEIGHT + residual_df
+    )
+
+    log2_fold_change = b.mean(axis=1) - a.mean(axis=1)
+    standard_error = np.sqrt(shrunk_var * (1.0 / n1 + 1.0 / n2))
+    t_stat = log2_fold_change / standard_error
+    p_value = 2.0 * scipy_stats.t.sf(np.abs(t_stat), df=MODERATION_PRIOR_WEIGHT + residual_df)
+    adjusted_p_value = _benjamini_hochberg(p_value)
+
+    return pd.DataFrame(
+        {"gene": log2cpm.index, "log2_fold_change": log2_fold_change, "adjusted_p_value": adjusted_p_value}
+    ).set_index("gene")
 
 
 def _load_result() -> dict[str, object]:
@@ -97,18 +139,7 @@ def _compute_reference() -> dict[str, object]:
     )
 
     log2cpm = _compute_log2_cpm(counts)
-    a_ids = condition[condition == "control"].index
-    b_ids = condition[condition == "treated"].index
-    a = log2cpm[a_ids].to_numpy(dtype=float)
-    b = log2cpm[b_ids].to_numpy(dtype=float)
-
-    _, p_value = scipy_stats.ttest_ind(b, a, axis=1, equal_var=False)
-    log2fc = b.mean(axis=1) - a.mean(axis=1)
-    padj = _benjamini_hochberg(p_value)
-
-    de = pd.DataFrame(
-        {"gene": log2cpm.index, "log2_fold_change": log2fc, "adjusted_p_value": padj}
-    ).set_index("gene")
+    de = _moderated_differential_expression(log2cpm, condition)
     de = de.sort_values("adjusted_p_value")
 
     return {
@@ -151,10 +182,11 @@ def test_all_thirteen_samples_were_id_verified(result: dict[str, object], refere
 def test_top_gene_matches_independent_recomputation(result: dict[str, object], reference: dict[str, object]) -> None:
     assert result["top_gene"] == reference["top_gene"], (
         f"reported top gene {result['top_gene']!r} does not match the independent "
-        f"ID-based, batch-aware recomputation ({reference['top_gene']!r}); this is the "
-        f"expected symptom of either a sample/label pairing that is internally "
-        f"consistent but wrong, or of running the comparison on all 13 samples "
-        f"without accounting for the single-sample batch2"
+        f"ID-based, batch-aware, variance-moderated recomputation ({reference['top_gene']!r}); "
+        f"this is the expected symptom of a sample/label pairing that is internally "
+        f"consistent but wrong, of running the comparison on all 13 samples without "
+        f"accounting for the single-sample batch2, or of using a plain per-gene test "
+        f"whose variance estimate is unreliable with only 6 samples per group"
     )
 
 

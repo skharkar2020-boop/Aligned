@@ -8,8 +8,9 @@
 via a SHA256-based `stable_seed`, not Python's `hash()`, so the script
 reproduces byte-identical output across runs and processes). That script
 also writes `../data_generation/private/ground_truth.json`, an
-authoring-only file carrying the full 300-gene ranked DE table computed
-from the correct, ID-based, batch-aware analysis; it is **not** copied into
+authoring-only file carrying the full 301-gene ranked DE table computed
+from the correct, ID-based, batch-aware, variance-moderated analysis; it is
+**not** copied into
 `environment/data/`, `tests/data/`, or either Docker build context, and
 must never be.
 
@@ -19,10 +20,11 @@ is hand-written, not generated, and is public/agent-visible by design.
 ## Bug-layer design and empirical verification
 
 Three compounding bugs are baked into `environment/data/pipeline/`, plus a
-batch-confound judgment that the pipeline never handles at all, and two
-additional difficulty layers, per the authoring brief. All of the following
-was verified by actually running the pipeline under two real,
-separately-installed dependency sets, not by inspection:
+batch-confound judgment and a small-sample statistical-method judgment that
+the pipeline never handles at all, and two additional difficulty layers,
+per the authoring brief. All of the following was verified by actually
+running the pipeline under two real, separately-installed dependency sets,
+not by inspection:
 
 1. **Warm-up crash** (`pipeline/io.py`): `counts.astype(np.float)`. Verified
    this raises `AttributeError: module 'numpy' has no attribute 'float'`
@@ -62,6 +64,30 @@ separately-installed dependency sets, not by inspection:
    of it. This was added after `task-review` flagged the task as closer to
    "locate straightforward defects" than to something requiring genuine
    domain expertise -- see "task-review findings" below.
+5. **Variance-instability trap, never handled by the pipeline** (data-level,
+   not a pipeline bug): `VARIANCE_TRAP` is a null gene (no true condition
+   effect) whose 12 batch1 counts are constructed deterministically into two
+   tight clusters (`VARIANCE_TRAP_TARGET_VARIANCE = 0.0005` in
+   `generate_data.py`, vs. a panel-wide typical per-gene variance around
+   0.25) with a small, coincidental apparent gap between them
+   (`VARIANCE_TRAP_APPARENT_DELTA = 0.25`). With only 6 samples per group, a
+   plain per-gene Welch's/pooled t-test cannot tell this gene's by-chance
+   tight variance apart from a real, low-noise effect: verified empirically
+   that on the correctly-joined, correctly-batch-filtered 12 samples, a
+   plain per-gene t-test ranks `VARIANCE_TRAP` #1 (padj=6.46e-07), ahead of
+   the real top gene `TRUE_TOP` (padj=2.82e-06). A variance-moderation step
+   (each gene's variance estimate shrunk toward the panel-wide typical
+   value, weighted by a prior weight vs. the gene's own residual df -- the
+   same idea behind limma's moderated t-test / DESeq2's dispersion
+   shrinkage) correctly recognizes `VARIANCE_TRAP`'s variance estimate as
+   unreliable and suppresses it (moderated rank ~62/301, padj=0.83) while
+   restoring `TRUE_TOP` to #1. Verified the conclusion is not sensitive to
+   the exact moderation strength: swept the prior weight from 2 to 20 and
+   `TRUE_TOP` won at every value tested, with padj ranging 8.0e-08 to
+   1.16e-06 -- all comfortably inside the verifier's tolerance around the
+   locked reference (prior weight 6, padj=1.03e-06). This was added for the
+   same `task-review` "difficult" finding as layer 4, after that finding
+   recurred following the first attempt to address it.
 
 Difficulty layer A (ambiguous IDs): sample roster is 6 control
 (`sample_1`-`sample_6`) + 7 treated (`sample_7`-`sample_12`, `sample_02`).
@@ -81,55 +107,54 @@ now has to stay correct (13) independently of the batch decision, which
 changes the *comparison* sample count (12) without changing the
 *verification* count.
 
-### Calibration record (n_genes=300, n_samples=13; TRUE_TOP log2FC=2.6/sigma=0.15,
+### Calibration record (n_genes=301, n_samples=13; TRUE_TOP log2FC=2.6/sigma=0.15,
 ### DECOY_A log2FC=2.3/sigma=0.30, DECOY_B log2FC=2.2/sigma=0.30, baseline
-### null genes log2FC=0; BATCH2_ARTIFACT_FACTOR=0.15 on sample_02's TRUE_TOP)
+### null genes log2FC=0; BATCH2_ARTIFACT_FACTOR=0.15 on sample_02's TRUE_TOP;
+### VARIANCE_TRAP target per-group variance=0.0005, apparent delta=0.25,
+### moderation prior weight=6.0)
 
 All values below are from the actual generated dataset, run through the
 actual shipped/reference code, not hand-derived:
 
 | Scenario | top gene | log2FC | adjusted p | verified_ids | notes |
 |---|---|---|---|---|---|
-| **Correct (ID-based, batch1-only, 12 of 13 used) -- locked ground truth** | `TRUE_TOP` | 2.2439 | 5.72e-06 | 13 | runner-up `DECOY_B` padj=8.5e-4, `DECOY_A` padj=9.8e-3 -- both nominally significant, clear margin to TRUE_TOP; verified count stays 13 even though only 12 feed the comparison |
+| **Correct (ID-based, batch1-only, moderated stats) -- locked ground truth** | `TRUE_TOP` | 2.2429 | 1.03e-06 | 13 | runner-up `DECOY_B` padj=5.3e-5, `DECOY_A` padj=1.2e-4 -- both nominally significant, clear margin to TRUE_TOP; `VARIANCE_TRAP` correctly suppressed to rank 62/301, padj=0.83; verified count stays 13 even though only 12 feed the comparison |
 | As shipped | -- | -- | -- | -- | crashes on `np.float` before producing any output |
 | Fix only `np.float`, pandas stays 1.5.3 (branch A) | `NFAT890` (null gene) | 0.799 | 0.811 | -- | designed genes buried, nothing reaches significance |
 | Same, pandas upgraded to 2.2.3 (branch B) | `ZNF621` (null gene) | 0.712 | 0.892 | -- | different top gene, different values, still nothing significant |
-| Naive dedup: drop `sample_02` as a perceived duplicate (12 samples) | `TRUE_TOP` (right gene, coincidentally close stats) | ~2.244 | ~5.7e-06 | 12 | numerically close to/matching the correct answer (both use the same 12 batch1 samples) -- this is the case the verified-count check exists specifically to catch, since nothing else distinguishes it from a batch-aware fix |
+| Naive dedup: drop `sample_02` as a perceived duplicate (12 samples) | `TRUE_TOP` (right gene, coincidentally close stats if stats are also done right) | ~2.244 | ~1.0e-06 | 12 | numerically close to/matching the correct answer when everything else is done right, since it uses the same 12 batch1 samples -- the case the verified-count check exists specifically to catch |
 | ID confusion: `sample_02` mislabeled with `sample_2`'s condition (13 samples, 1 wrong label) | `DECOY_A` | 1.884 | 0.383 | 13 | one flipped label is enough at this n to both fail significance and change which gene ranks first |
-| Correct alignment, all 13 samples, no batch exclusion (batch-blind) | `DECOY_B` | 2.094 | 1.04e-03 | 13 | the closest wrong answer to correct: alignment is genuinely right, verified count is genuinely 13, and the result is confidently significant -- only the batch judgment is missing |
+| Correct alignment, all 13 samples, no batch exclusion (batch-blind, naive stats) | `DECOY_B` | 2.090 | 1.08e-03 | 13 | alignment is genuinely right, verified count is genuinely 13, and the result is confidently significant -- only the batch judgment is missing |
+| Correct alignment + batch exclusion, plain per-gene t-test (no variance moderation) | `VARIANCE_TRAP` | 0.254 | 6.46e-07 | 13 | the closest wrong answer to correct: alignment right, batch judgment right, verified count right, and the result is *more* significant than the true answer -- only the statistical-method judgment is missing |
 
 Every wrong scenario fails at least one verifier check. The "drop
-`sample_02`" and "batch-blind" rows are deliberately the two
-closest-to-passing failures (batch-blind gets alignment, count, and
-significance all "right" -- just not the batch decision; drop-as-duplicate
-gets the DE numbers right by relying on the same 12 samples for the wrong
-reason) to confirm the verifier's checks are each independently
-load-bearing rather than redundant: `top_gene`/`log2_fold_change`/
-`adjusted_p_value` catch batch-blindness, `verified_matching_sample_ids`
-catches the naive-dedup case that the other three fields cannot.
+`sample_02`" and both "correct-except-one-judgment" rows are deliberately
+the closest-to-passing failures (each gets three of the four verifier
+checks "right" by construction) to confirm the verifier's checks are each
+independently load-bearing rather than redundant: `top_gene`/
+`log2_fold_change`/`adjusted_p_value` catch batch-blindness and the
+unmoderated test, `verified_matching_sample_ids` catches the naive-dedup
+case that the other three fields cannot.
 
 Re-run the generator to reproduce: `python3 data_generation/generate_data.py`
 from the project root writes `data_generation/public/*.csv` (copy into
 `environment/data/` and `tests/data/`) and
 `data_generation/private/ground_truth.json` (authoring-only, never ships).
 
-## task-review findings (first pass) and how they were addressed
+## task-review findings and how they were addressed
 
-The first `task-review` pass (before the batch-confound addition) returned
-`Fail` with four findings:
+**First pass** (before the batch-confound addition) returned `Fail` with
+four findings:
 
 1. **`difficult`** -- the task read as "locate straightforward defects in a
    small pipeline" rather than requiring genuine domain expertise. Addressed
-   by adding the batch-confound judgment (layer 4 above): recognizing that a
-   single-sample batch cannot be statistically corrected for, and deciding
-   to exclude it from the comparison while still verifying its identity, is
-   real, professionally-relevant RNA-seq/experimental-design knowledge, not
-   a code-reading exercise. `drug_discovery_pipeline.md` section 8a ("Data /
-   ML / infrastructure") also lists "fix a broken analysis pipeline and
-   reproduce a previously reported number" as a representative task for
-   this category -- `task.toml`'s `category`/`tags` were updated to reflect
-   that classification instead of the stage-1 target-ID framing the
-   placeholder tags implied.
+   (attempt 1) by adding the batch-confound judgment (layer 4 above).
+   `drug_discovery_pipeline.md` section 8a ("Data / ML / infrastructure")
+   also lists "fix a broken analysis pipeline and reproduce a previously
+   reported number" as a representative task for this category --
+   `task.toml`'s `category`/`tags` were updated to reflect that
+   classification instead of the stage-1 target-ID framing the placeholder
+   tags implied.
 2. **`environment_hygiene`** -- pytest/pytest-json-ctrf were baked into
    `environment/Dockerfile` alongside the runtime deps. Addressed by
    rewriting `tests/test_outputs.py` as a plain script with no
@@ -144,21 +169,43 @@ The first `task-review` pass (before the batch-confound addition) returned
    and who does this work in practice. Addressed in the author-drafted
    `difficulty_explanation`.
 
+**Second pass** (after the batch-confound addition, re-running
+`task-fixer`/`task-review`) returned `Fail` again with the same four
+findings. \#3 and \#4 were expected (the `task.toml` explanation fields had
+not yet been updated for the batch-confound addition at that point). \#2
+turned out to be a stale local checkout on the reviewer's machine, not a
+real regression -- confirmed by re-reading the current `environment/Dockerfile`,
+which already reflected the attempt-1 fix. \#1 recurring after a real,
+substantive addition was the important signal: excluding a single-sample
+batch is genuine domain knowledge, but it is also a single, well-known rule
+-- once you know it, applying it here is not that hard, and the rubric's
+bar is "PhD in related fields" / "several years of domain expertise."
+Addressed (attempt 2) by adding the variance-moderation judgment (layer 5
+above), which requires understanding *why* per-gene variance estimates are
+unreliable at n=6 and how cross-gene shrinkage fixes that -- the actual
+statistical reasoning behind limma/DESeq2 for small-replicate genomics, not
+a single fact to know or not know.
+
 `task-fixer`/`task-review` have not yet been re-run against the
-batch-confound version of the task; that is the next step.
+variance-moderation version of the task; that is the next step.
 
 ## Open items for the human author
 
 - Re-run `./scripts/run-task-fixer.sh task` and
-  `./scripts/run-task-review.sh task` against the current state (batch
-  confound added, verifier now pytest-free, data/ground truth re-locked).
+  `./scripts/run-task-review.sh task` against the current state (variance
+  moderation added, data/ground truth re-locked again). Confirm you are on
+  the latest pushed commit first (`git log -1 --oneline`) -- the previous
+  `environment_hygiene` false-positive was caused by reviewing a stale
+  checkout.
 - Re-run the Docker smoke test (`./harbor_runner.py task --no-remote
-  --smoke-test`) -- the previous pass (before this round of changes) was
-  confirmed green by the human author on their own machine; it has not been
-  re-run since the batch-confound addition, the wheel changes, or the data
-  regeneration. The venv-based equivalent (solve.py against the new data,
-  verified against the new `test_outputs.py`, using only
-  `environment/wheels/`) was re-run here and passes.
+  --smoke-test`) against the current state -- the most recent confirmed-green
+  Docker run predates the variance-moderation addition. The venv-based
+  equivalent (solve.py against the new data, verified against the new
+  `test_outputs.py`, using only `environment/wheels/`) was re-run here and
+  passes.
+- `task.toml`'s three explanation fields describe the batch-confound design
+  but not yet the variance-moderation addition; another author pass is
+  needed there too.
 - `task-fixer`, `task-review`, the Harbor campaign, and `trajectory-review`
   full end-to-end run against real Claude Code / Codex / Gemini trials
   (the step 10 hard gate: every agent must fail at least 2 of 4 trials) has

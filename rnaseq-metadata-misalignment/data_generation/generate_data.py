@@ -50,6 +50,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "task" / "environment" / "data"))
@@ -74,6 +75,31 @@ def stable_seed(*parts) -> int:
 # comfortable margin below it.
 BATCH2_ARTIFACT_GENE = "TRUE_TOP"
 BATCH2_ARTIFACT_FACTOR = 0.15
+
+# VARIANCE_TRAP is a null gene (no true condition effect) constructed so its
+# 12 batch1 samples land in two tight, deterministic clusters with a small
+# apparent gap between them -- by chance/construction, not biology. Its own
+# per-gene sample variance is far below the panel's typical spread, which is
+# exactly the situation a plain per-gene t-test cannot distinguish from a
+# real, low-noise effect: with only 6 samples per group, a per-gene variance
+# estimate is itself extremely noisy, and a gene that happens to land with
+# low realized variance produces an artificially inflated t-statistic. A
+# gene-panel-wide variance-shrinkage step (moderating each gene's variance
+# estimate toward the panel's typical value, weighted by how much prior
+# confidence to place in that typical value vs. this gene's own noisy
+# estimate -- the same idea behind limma's empirical-Bayes moderated t-test
+# and DESeq2's dispersion shrinkage) correctly recognizes this gene's
+# variance estimate as unreliable and pulls it back up, suppressing the
+# false positive; a plain per-gene t-test cannot. Verified empirically (see
+# task/README.md): under a plain Welch's t-test VARIANCE_TRAP outranks
+# TRUE_TOP; under moderated variance (any prior weight tested from 4 to 8)
+# TRUE_TOP is restored and VARIANCE_TRAP drops to the noise floor.
+VARIANCE_TRAP_GENE = "VARIANCE_TRAP"
+VARIANCE_TRAP_POSITION = 88
+VARIANCE_TRAP_BASELINE_LOG2CPM = 12.0
+VARIANCE_TRAP_APPARENT_DELTA = 0.25
+VARIANCE_TRAP_TARGET_VARIANCE = 0.0005  # per-group sample variance (ddof=1) in log2(CPM+1) space
+MODERATION_PRIOR_WEIGHT = 6.0  # d0: simplified, fixed prior weight (not fit via REML/method-of-moments)
 
 N_GENES = 300
 GENE_PREFIXES = [
@@ -140,7 +166,12 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
         "DECOY_B": {"log2fc": 2.2, "sigma": 0.30, "baseline": 300.0},
     }
     # Fixed, non-obvious positions in the gene panel (not gene[0], gene[1], gene[2]).
-    designed_positions = {"TRUE_TOP": 137, "DECOY_A": 42, "DECOY_B": 216}
+    designed_positions = {
+        "TRUE_TOP": 137,
+        "DECOY_A": 42,
+        "DECOY_B": 216,
+        "VARIANCE_TRAP": VARIANCE_TRAP_POSITION,
+    }
     gene_symbols = list(gene_symbols)
     for name, pos in designed_positions.items():
         gene_symbols[pos] = name  # overwrite panel entries with the designed gene names
@@ -178,7 +209,43 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
             original = counts_df.loc[BATCH2_ARTIFACT_GENE, sid]
             counts_df.loc[BATCH2_ARTIFACT_GENE, sid] = int(round(original * BATCH2_ARTIFACT_FACTOR))
 
+    inject_variance_trap(counts_df, metadata)
+
     return counts_df, designed_positions
+
+
+def inject_variance_trap(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> None:
+    """Overwrite VARIANCE_TRAP_GENE's batch1 counts with a deterministic,
+    tightly-clustered pattern (see VARIANCE_TRAP_* constants above).
+
+    Uses each sample's own already-simulated library size (this gene's own
+    contribution to it is negligible) to convert a target log2(CPM+1) value
+    into a raw count, so that the pipeline's own CPM normalization recovers
+    the intended log2cpm pattern almost exactly (up to integer rounding,
+    which is kept small by using a high baseline CPM). Deterministic --
+    consumes no RNG draws, so it cannot perturb any other gene or sample.
+    """
+    batch1 = metadata[metadata["batch"] == "batch1"]
+    control_ids = batch1.loc[batch1["condition"] == "control", "sample_id"].tolist()
+    treated_ids = batch1.loc[batch1["condition"] == "treated", "sample_id"].tolist()
+    assert len(control_ids) == len(treated_ids) == 6
+
+    lib_sizes = counts_df.sum(axis=0)
+
+    raw_offsets = np.array([-1.5, -0.9, -0.3, 0.3, 0.9, 1.5])
+    raw_offsets = raw_offsets - raw_offsets.mean()
+    unit_offsets = raw_offsets / np.sqrt(raw_offsets.var(ddof=1))
+    scaled_offsets = unit_offsets * np.sqrt(VARIANCE_TRAP_TARGET_VARIANCE)
+
+    def set_counts(sample_ids: list[str], center_log2cpm: float) -> None:
+        for offset, sid in zip(scaled_offsets, sample_ids):
+            target_log2cpm = center_log2cpm + offset
+            cpm = 2.0**target_log2cpm - 1.0
+            count = int(round(cpm * lib_sizes[sid] / 1e6))
+            counts_df.loc[VARIANCE_TRAP_GENE, sid] = count
+
+    set_counts(control_ids, VARIANCE_TRAP_BASELINE_LOG2CPM)
+    set_counts(treated_ids, VARIANCE_TRAP_BASELINE_LOG2CPM + VARIANCE_TRAP_APPARENT_DELTA)
 
 
 def batch_confound_free_sample_ids(metadata: pd.DataFrame) -> list[str]:
@@ -193,10 +260,53 @@ def batch_confound_free_sample_ids(metadata: pd.DataFrame) -> list[str]:
     return metadata.loc[batch_sizes >= 2, "sample_id"].tolist()
 
 
+def moderated_differential_expression(
+    log2cpm: pd.DataFrame,
+    condition: pd.Series,
+    group_a: str = "control",
+    group_b: str = "treated",
+    prior_weight: float = MODERATION_PRIOR_WEIGHT,
+) -> pd.DataFrame:
+    """Per-gene pooled-variance t-test with empirical-Bayes-style variance
+    moderation: each gene's own (noisy, small-n) variance estimate is
+    shrunk toward the panel-wide typical variance, weighted by
+    `prior_weight` vs. this gene's residual degrees of freedom. Simplified
+    relative to limma's eBayes (prior_weight is fixed, not fit via
+    method-of-moments/REML), but the mechanism -- and why it matters with
+    only 6 samples per group -- is the same.
+    """
+    a_ids = condition[condition == group_a].index
+    b_ids = condition[condition == group_b].index
+    a = log2cpm[a_ids].to_numpy(dtype=float)
+    b = log2cpm[b_ids].to_numpy(dtype=float)
+    n1, n2 = a.shape[1], b.shape[1]
+    residual_df = n1 + n2 - 2
+
+    pooled_var = ((n1 - 1) * a.var(axis=1, ddof=1) + (n2 - 1) * b.var(axis=1, ddof=1)) / residual_df
+    prior_var = float(np.median(pooled_var))
+    shrunk_var = (prior_weight * prior_var + residual_df * pooled_var) / (prior_weight + residual_df)
+
+    log2_fold_change = b.mean(axis=1) - a.mean(axis=1)
+    standard_error = np.sqrt(shrunk_var * (1.0 / n1 + 1.0 / n2))
+    t_stat = log2_fold_change / standard_error
+    moderated_df = prior_weight + residual_df
+    p_value = 2.0 * scipy_stats.t.sf(np.abs(t_stat), df=moderated_df)
+    adjusted_p_value = pipeline_stats.benjamini_hochberg(p_value)
+
+    return pd.DataFrame(
+        {
+            "gene": log2cpm.index,
+            "log2_fold_change": log2_fold_change,
+            "p_value": p_value,
+            "adjusted_p_value": adjusted_p_value,
+        }
+    ).set_index("gene")
+
+
 def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
     """Correct analysis: the answer key.
 
-    Two independent requirements, both necessary:
+    Three independent requirements, all necessary:
     1. ID-based alignment -- every sample's expression profile is matched to
        its metadata by sample_id, never by row/column position, since the
        expression matrix and metadata are independently ordered.
@@ -206,6 +316,12 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
        effect. sample_02 (batch2, n=1) is still ID-verified like every other
        sample; it is excluded from the statistical comparison, not from
        verification.
+    3. Variance moderation -- with only 6 samples per group, a plain
+       per-gene t-test's variance estimate is itself unstable enough that a
+       null gene with a by-chance tight variance can outrank a real,
+       low-noise effect. Moderating each gene's variance toward the panel's
+       typical value is necessary to get the right answer, not just a nicer
+       one.
     """
     all_ids = metadata["sample_id"].tolist()
     verified_matching_sample_ids = sum(
@@ -219,7 +335,7 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
     )
 
     log2cpm = pipeline_stats.compute_log2_cpm(counts_ordered)
-    de_table = pipeline_stats.differential_expression(log2cpm, condition)
+    de_table = moderated_differential_expression(log2cpm, condition)
     de_table = de_table.sort_values("adjusted_p_value")
 
     top = de_table.iloc[0]

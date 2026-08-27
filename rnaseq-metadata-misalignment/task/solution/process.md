@@ -60,6 +60,22 @@ other sample. Running the comparison on all 13 without accounting for this
 produces a different, still non-crashing, still nominally significant top
 gene: not an error, a wrong answer that happens to look complete.
 
+Correct alignment and the batch decision are still not sufficient. With
+only 6 samples per condition (once `sample_02` is correctly excluded), the
+pipeline's own per-gene Welch's t-test has a real statistical weakness:
+each gene's variance estimate comes from just 6 and 6 observations, which
+is itself a noisy quantity with only 6 df. A gene with no real condition
+effect can, purely by chance, land with an unusually small sample variance
+and produce an artificially tiny p-value -- indistinguishable, using that
+gene's own data alone, from a real, low-noise effect. This is the exact
+problem tools like limma (moderated t-statistics) and DESeq2 (dispersion
+shrinkage) exist to solve for small-replicate genomics: borrow information
+across the whole gene panel to get a more stable per-gene variance
+estimate, rather than trusting each gene's own 6-and-6 estimate in
+isolation. Running the pipeline's plain t-test on the correctly-joined,
+correctly-batch-filtered data still produces a wrong, confidently
+significant top gene, for this reason.
+
 ## Steps
 
 1. Run `python -m pipeline.run_pipeline` (or equivalent) against
@@ -97,11 +113,16 @@ gene: not an error, a wrong answer that happens to look complete.
    Exclude it from the differential-expression comparison for that reason
    (not because its ID is ambiguous -- it already passed step 5) and use
    the 12 batch1 samples for the comparison itself.
-7. Recompute log2(CPM + 1) per sample and run the pipeline's own
-   differential-expression step (Welch's t-test per gene, treated vs.
-   control, Benjamini-Hochberg FDR correction) on the correctly joined,
-   batch-filtered table. Take the gene with the smallest adjusted p-value
-   as the top hit.
+7. Recompute log2(CPM + 1) per sample on the correctly joined,
+   batch-filtered table. Do not stop at the pipeline's own plain per-gene
+   t-test: with only 6 samples per group, shrink each gene's variance
+   estimate toward the panel-wide typical variance before computing the
+   test statistic (a moderated t-test, in the spirit of limma's
+   empirical-Bayes approach -- a fixed, reasonable prior weight is a
+   defensible simplification of fitting one; the conclusion is not
+   sensitive to the exact value). Apply Benjamini-Hochberg FDR correction
+   to the resulting p-values and take the gene with the smallest adjusted
+   p-value as the top hit.
 8. Write `result.json` with the top gene's symbol, its log2 fold-change
    (treated vs. control), its BH-adjusted p-value, and the verified sample
    count (13, from step 5 -- not the 12 used in step 7), using
@@ -114,9 +135,14 @@ different installed pandas major versions (1.x and 2.x) reproduces
 identical output -- confirming the fix is genuinely ID-based rather than
 incidentally correct for one pandas version's default behavior. The
 reference result was cross-checked against an independent, from-scratch
-recomputation (same CPM/t-test/BH procedure, implemented separately from
-the pipeline module) that joins on `sample_id` directly from the two raw
-input files and applies the same batch filter; the two agree exactly.
+recomputation (same CPM/moderated-t/BH procedure, implemented separately
+from both the pipeline module and solve.py) that joins on `sample_id`
+directly from the two raw input files, applies the same batch filter, and
+applies the same variance moderation; the two agree exactly. The
+moderation prior weight was swept from 2 to 20 to confirm the top gene and
+its statistics stay within the verifier's tolerance across that whole
+range -- the conclusion depends on moderating at all, not on the exact
+prior weight chosen.
 
 Several wrong-but-plausible scenarios were run against the same data as an
 internal check that the verifier would actually catch them, none of which
@@ -132,10 +158,16 @@ crash or produce a NaN:
 - Running the comparison on all 13 correctly-ID-verified samples --
   correct alignment, but without the batch-2 exclusion -- reports a
   *different* gene as top, at an adjusted p-value (~1e-3) that clears an
-  unwary "is it significant" check on its own. This is the closest wrong
-  answer to correct: everything about it is internally consistent except
-  the batch judgment, and it is deliberately calibrated to be a confident,
-  plausible-looking wrong answer rather than an obviously broken one.
+  unwary "is it significant" check on its own.
+- Running the pipeline's own plain per-gene t-test (no variance
+  moderation) on the correctly joined, correctly batch-filtered 12 samples
+  reports a different gene as top, at an adjusted p-value even smaller
+  than the true top gene's -- a null gene whose 6-and-6 sample variance is,
+  by construction, unusually tight. This is the closest wrong answer to
+  correct: alignment is genuinely right, the batch judgment is genuinely
+  right, and the result is confidently, validly significant by every
+  check except that the statistical method itself is not robust enough
+  for this sample size.
 
 All are visibly different from the locked reference values on at least one
 checked field.

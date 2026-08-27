@@ -51,6 +51,23 @@ verifying every sample's identity, including sample_02's. Skipping this and
 running the comparison on all 13 samples produces a different, still
 plausible-looking, still nominally significant top gene -- not an error, a
 wrong answer.
+
+Alignment and the batch decision are still not sufficient. With only 6
+samples per condition, pipeline/stats.py's plain per-gene Welch's t-test has
+a real weakness: each gene's variance estimate comes from just 6 and 6
+observations, which is itself a noisy estimate. A gene with no real
+condition effect can, by chance, land with an unusually small sample
+variance and produce an artificially small p-value -- indistinguishable
+from a real, low-noise effect using that gene's data alone. This is
+exactly why tools like limma (moderated t-statistics) and DESeq2
+(dispersion shrinkage) exist for small-replicate genomics: borrow
+information across all genes to get a more stable variance estimate per
+gene, rather than trusting each gene's own noisy estimate in isolation.
+The fix below shrinks each gene's variance toward the panel-wide typical
+variance before computing the test statistic -- a simplified version of
+the same idea (a fixed prior weight rather than a fit hyperparameter), but
+the same reasoning. Skipping this recovers a plausible, non-crashing,
+nominally significant top gene that is not the right one.
 """
 
 from __future__ import annotations
@@ -60,13 +77,52 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from scipy import stats as scipy_stats
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/workspace/data"))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "/workspace/output"))
 
 sys.path.insert(0, str(DATA_DIR))
 from pipeline import stats as pipeline_stats  # noqa: E402
+
+# Prior weight (d0) for variance moderation: how much to trust the
+# panel-wide typical variance relative to each gene's own noisy estimate.
+# Fixed here rather than fit via method-of-moments/REML (the full
+# limma/eBayes approach) -- a defensible simplification, not the point of
+# the exercise, and the conclusion (which gene is top) is robust to the
+# exact value chosen (checked from 2 to 20; see task/README.md).
+MODERATION_PRIOR_WEIGHT = 6.0
+
+
+def moderated_differential_expression(
+    log2cpm: pd.DataFrame, condition: pd.Series, group_a: str = "control", group_b: str = "treated"
+) -> pd.DataFrame:
+    a = log2cpm[condition[condition == group_a].index].to_numpy(dtype=float)
+    b = log2cpm[condition[condition == group_b].index].to_numpy(dtype=float)
+    n1, n2 = a.shape[1], b.shape[1]
+    residual_df = n1 + n2 - 2
+
+    pooled_var = ((n1 - 1) * a.var(axis=1, ddof=1) + (n2 - 1) * b.var(axis=1, ddof=1)) / residual_df
+    prior_var = float(np.median(pooled_var))
+    shrunk_var = (MODERATION_PRIOR_WEIGHT * prior_var + residual_df * pooled_var) / (
+        MODERATION_PRIOR_WEIGHT + residual_df
+    )
+
+    log2_fold_change = b.mean(axis=1) - a.mean(axis=1)
+    standard_error = np.sqrt(shrunk_var * (1.0 / n1 + 1.0 / n2))
+    t_stat = log2_fold_change / standard_error
+    p_value = 2.0 * scipy_stats.t.sf(np.abs(t_stat), df=MODERATION_PRIOR_WEIGHT + residual_df)
+    adjusted_p_value = pipeline_stats.benjamini_hochberg(p_value)
+
+    return pd.DataFrame(
+        {
+            "gene": log2cpm.index,
+            "log2_fold_change": log2_fold_change,
+            "adjusted_p_value": adjusted_p_value,
+        }
+    ).set_index("gene")
 
 
 def main() -> None:
@@ -108,7 +164,7 @@ def main() -> None:
     )
 
     log2cpm = pipeline_stats.compute_log2_cpm(counts_ordered)
-    de_table = pipeline_stats.differential_expression(log2cpm, condition)
+    de_table = moderated_differential_expression(log2cpm, condition)
     de_table = de_table.sort_values("adjusted_p_value")
 
     top_gene = de_table.index[0]
