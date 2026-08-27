@@ -15,7 +15,7 @@ strong that relationship is.
 
 The task inputs are available under `/workspace/data`:
 
-- `pk_concentrations.csv`: sparse, noised pharmacokinetic concentration-time
+- `pk_concentrations.csv`: sparse, noisy pharmacokinetic concentration-time
   samples. Columns: `subject_id`, `cohort`, `time_hr` (hours post first
   dose), `analyte` (`parent`, `M1`, or `M2`), `conc_ng_ml` (plasma
   concentration, ng/mL).
