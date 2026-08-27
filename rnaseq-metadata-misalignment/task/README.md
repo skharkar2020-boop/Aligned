@@ -8,205 +8,139 @@
 via a SHA256-based `stable_seed`, not Python's `hash()`, so the script
 reproduces byte-identical output across runs and processes). That script
 also writes `../data_generation/private/ground_truth.json`, an
-authoring-only file carrying the full 301-gene ranked DE table computed
-from the correct, ID-based, batch-aware, variance-moderated analysis; it is
-**not** copied into
-`environment/data/`, `tests/data/`, or either Docker build context, and
-must never be.
+authoring-only file carrying the full per-cohort ranked DE tables computed
+from the correct, ID-based, cross-cohort-reconciled analysis; it is **not**
+copied into `environment/data/`, `tests/data/`, or either Docker build
+context, and must never be.
 
 `environment/data/pipeline/` (the code the agent actually runs and fixes)
 is hand-written, not generated, and is public/agent-visible by design.
 
+## Design history
+
+This task went through three authoring rounds. The first two rounds
+(single-cohort alignment bugs, then a batch-confound judgment, then a
+small-sample variance-moderation judgment) each drew the same `task-review`
+`difficult` finding: the task read as "locate straightforward defects,"
+not something requiring genuine domain expertise. Both individual
+additions were real, professionally-relevant knowledge, but each was a
+single, well-known rule -- once you know it, applying it is mechanical.
+That is not the same as judgment under genuine disagreement, and adding
+more individually-mechanical rules did not change the task's shape.
+
+The third round is a structural rebuild rather than another rule: two
+independent cohorts that each produce a complete, individually defensible,
+non-crashing analysis, and disagree. Resolving the disagreement requires
+reconciling conflicting evidence -- recognizing *why* one cohort's result
+doesn't generalize -- not looking up a fact. This mirrors
+`metabolite-decoy-trap`'s actual structure (two dosing cohorts give
+opposite answers; the task is determining which one's evidence survives
+scrutiny), which is the reference example that reliably clears the
+`difficult` bar.
+
+The single-sample `batch2`/`sample_02` device and the `VARIANCE_TRAP`
+small-sample statistical-method trap from the earlier rounds were retired:
+both were increasingly fragile to calibrate (see the numeric sweeps
+below and in prior commits) and, per the redesign brief, the
+cross-cohort reconciliation is now the primary source of difficulty
+rather than something layered alongside a separate fragile mechanism.
+
 ## Bug-layer design and empirical verification
 
-Three compounding bugs are baked into `environment/data/pipeline/`, plus a
-batch-confound judgment and a small-sample statistical-method judgment that
-the pipeline never handles at all, and two additional difficulty layers,
-per the authoring brief. All of the following was verified by actually
-running the pipeline under two real, separately-installed dependency sets,
-not by inspection:
+Three compounding code defects are baked into `environment/data/pipeline/`,
+plus a cross-cohort confound the pipeline never handles at all. All of the
+following was verified by actually running the pipeline and reference code
+under two real, separately-installed dependency sets, not by inspection:
 
 1. **Warm-up crash** (`pipeline/io.py`): `counts.astype(np.float)`. Verified
    this raises `AttributeError: module 'numpy' has no attribute 'float'`
    under numpy==1.26.4 (the pinned runtime version) and does not under
-   numpy<1.24 -- confirming the crash is real and version-driven, not
-   simulated.
+   numpy<1.24.
 2. **Silent misalignment** (`pipeline/qc.py`): the QC report's
    `sort_values("sample_id")` lexicographically reorders string IDs
    (`sample_10` sorts before `sample_2`), and that reordered table becomes
    the canonical metadata for the rest of the run.
-3. **Hard-negative merge** (`pipeline/align.py`): concatenates
-   expression and (now-reordered) metadata positionally after resetting
-   both indices, branching on the installed pandas major version. Verified
-   with real pandas 1.5.3 and 2.2.3 (both installed from a local
-   `pip download --platform manylinux2014_x86_64 --python-version 3.11`
-   wheelhouse, offline): the two branches produce genuinely different
-   permutations (9/13 metadata-to-sample correspondences survive under the
-   pandas<2 branch's pairing vs. 5/13 under the pandas>=2 branch's pairing,
-   for the shipped dataset), so "upgrading" pandas after fixing the crash
-   changes the wrong answer rather than fixing it.
-4. **Batch confound, never handled by the pipeline** (data-level, not a
-   pipeline bug): `sample_02` is the sole member of `batch2`; every other
-   sample is `batch1`. A single-sample batch cannot be statistically
-   distinguished from a real biological effect. `sample_02`'s `TRUE_TOP`
-   count carries a deliberate, calibrated technical-artifact scale-down
-   (`BATCH2_ARTIFACT_FACTOR = 0.15` in `generate_data.py`) that lands it
-   within the *control* group's own `TRUE_TOP` range (569, vs. controls'
-   507-743) -- statistically invisible as an outlier on its own, but strong
-   enough that naively including `sample_02` in the treated group changes
-   which gene comes out on top. Excluding the confounded singleton batch
-   (the defensible move: fixing alignment is necessary but not sufficient)
-   recovers the correct answer and is completely unaffected by the
-   artifact's magnitude, since `sample_02`'s data never enters that
-   comparison. The flip boundary between "still recovers TRUE_TOP" and
-   "flips to a different top gene" was swept empirically and falls between
-   factor 0.32 and 0.35; 0.15 keeps a comfortable margin on the wrong side
-   of it. This was added after `task-review` flagged the task as closer to
-   "locate straightforward defects" than to something requiring genuine
-   domain expertise -- see "task-review findings" below.
-5. **Variance-instability trap, never handled by the pipeline** (data-level,
-   not a pipeline bug): `VARIANCE_TRAP` is a null gene (no true condition
-   effect) whose 12 batch1 counts are constructed deterministically into two
-   tight clusters (`VARIANCE_TRAP_TARGET_VARIANCE = 0.0005` in
-   `generate_data.py`, vs. a panel-wide typical per-gene variance around
-   0.25) with a small, coincidental apparent gap between them
-   (`VARIANCE_TRAP_APPARENT_DELTA = 0.25`). With only 6 samples per group, a
-   plain per-gene Welch's/pooled t-test cannot tell this gene's by-chance
-   tight variance apart from a real, low-noise effect: verified empirically
-   that on the correctly-joined, correctly-batch-filtered 12 samples, a
-   plain per-gene t-test ranks `VARIANCE_TRAP` #1 (padj=6.46e-07), ahead of
-   the real top gene `TRUE_TOP` (padj=2.82e-06). A variance-moderation step
-   (each gene's variance estimate shrunk toward the panel-wide typical
-   value, weighted by a prior weight vs. the gene's own residual df -- the
-   same idea behind limma's moderated t-test / DESeq2's dispersion
-   shrinkage) correctly recognizes `VARIANCE_TRAP`'s variance estimate as
-   unreliable and suppresses it (moderated rank ~62/301, padj=0.83) while
-   restoring `TRUE_TOP` to #1. Verified the conclusion is not sensitive to
-   the exact moderation strength: swept the prior weight from 2 to 20 and
-   `TRUE_TOP` won at every value tested, with padj ranging 8.0e-08 to
-   1.16e-06 -- all comfortably inside the verifier's tolerance around the
-   locked reference (prior weight 6, padj=1.03e-06). This was added for the
-   same `task-review` "difficult" finding as layer 4, after that finding
-   recurred following the first attempt to address it.
+3. **Hard-negative merge** (`pipeline/align.py`): concatenates expression
+   and (now-reordered) metadata positionally after resetting both indices,
+   branching on the installed pandas major version. Verified with real
+   pandas 1.5.3 and 2.2.3 (both installed from a local `pip download
+   --platform manylinux2014_x86_64 --python-version 3.11` wheelhouse,
+   offline): "upgrading" pandas after fixing the crash changes the wrong
+   answer (a different unrelated null gene) rather than fixing it.
+4. **Cross-cohort confound, never handled by the pipeline** (data-level,
+   not a pipeline bug): `cohort2` (`sample_13`-`sample_24`) is a later,
+   independent 12-sample run. Every gene's biological noise is higher
+   there (`COHORT2_EXTRA_SIGMA = 0.40` in `generate_data.py` -- cohort2
+   was less controlled), and `CONFOUND_GENE` carries a real,
+   deliberate technical artifact confined to cohort2: its treated samples
+   get an additional `2^CONFOUND_GENE_LOG2_SHIFT` (shift = 3.5) scale,
+   simulating a processing-date/reagent-lot difference confounded with
+   condition only within that cohort. Verified empirically (numbers below)
+   that this makes a naive cohort2-only analysis rank `CONFOUND_GENE`
+   above the true top gene, while the true top gene still shows a real,
+   same-signed, nominally-significant (though not BH-significant) effect
+   in cohort2, and `CONFOUND_GENE` shows no such support (wrong-signed,
+   p=0.13) in cohort1. The pipeline itself has no cohort awareness at all
+   and pools all 24 samples by default once alignment is fixed.
 
-Difficulty layer A (ambiguous IDs): sample roster is 6 control
-(`sample_1`-`sample_6`) + 7 treated (`sample_7`-`sample_12`, `sample_02`).
-`sample_2` and `sample_02` are two real, independent samples (batch1 vs. a
-later-arriving batch2 with a zero-padded ID convention), deliberately
-assigned *opposite* conditions (`sample_2` control, `sample_02` treated) so
-that confusing the two is not a no-op. Layer B (misleading assertion):
-`run_pipeline.py`'s `assert combined.shape[0] == metadata.shape[0]` is
-real, present, and passes in every misaligned scenario tested below -- it
-only checks row *count*. Layer C (near-miss genes): `DECOY_A`/`DECOY_B` are
-designed to sit close enough to `TRUE_TOP` that a near-correct alignment
-can promote either of them -- and, as of the batch-confound addition,
-`DECOY_B` specifically is what a batch-blind but otherwise-correct analysis
-lands on. Layer D: `verified_matching_sample_ids` is not part of the
-shipped pipeline's output at all; it must be added by whoever fixes it, and
-now has to stay correct (13) independently of the batch decision, which
-changes the *comparison* sample count (12) without changing the
-*verification* count.
+Difficulty layer B (misleading assertion): `run_pipeline.py`'s
+`assert combined.shape[0] == metadata.shape[0]` is real, present, and
+passes in every misaligned scenario tested below -- it only checks row
+*count*. Layer C (near-miss genes): `DECOY_A`/`DECOY_B` are designed to
+sit close enough to the true top gene that a near-correct single-cohort
+analysis can promote either of them; both are nominally significant
+runners-up in `cohort1`. Layer D:  `verified_matching_sample_ids` is not
+part of the shipped pipeline's output at all; it must be added by whoever
+fixes it, and stays 24 regardless of which cohort's numbers get reported.
 
-### Calibration record (n_genes=301, n_samples=13; TRUE_TOP log2FC=2.6/sigma=0.15,
-### DECOY_A log2FC=2.3/sigma=0.30, DECOY_B log2FC=2.2/sigma=0.30, baseline
-### null genes log2FC=0; BATCH2_ARTIFACT_FACTOR=0.15 on sample_02's TRUE_TOP;
-### VARIANCE_TRAP target per-group variance=0.0005, apparent delta=0.25,
-### moderation prior weight=6.0)
+### Calibration record (n_genes=300, n_samples=24 across 2 cohorts of 12;
+### TRUE_TOP log2FC=2.6/sigma=0.15, DECOY_A log2FC=2.3/sigma=0.30,
+### DECOY_B log2FC=2.2/sigma=0.30, CONFOUND_GENE log2FC=0.0/sigma=0.30,
+### COHORT2_EXTRA_SIGMA=0.40, CONFOUND_GENE_LOG2_SHIFT=3.5)
 
 All values below are from the actual generated dataset, run through the
-actual shipped/reference code, not hand-derived:
+actual shipped/reference code, not hand-derived. Designed gene symbols in
+this run: TRUE_TOP=`CACNA619`, DECOY_A=`PSMD475`, DECOY_B=`FOX838`,
+CONFOUND_GENE=`TUBB478` (re-generating the dataset reassigns symbols
+deterministically but keeps the same statistical structure).
 
-| Scenario | top gene | log2FC | adjusted p | verified_ids | notes |
-|---|---|---|---|---|---|
-| **Correct (ID-based, batch1-only, moderated stats) -- locked ground truth** | `TRUE_TOP` | 2.2429 | 1.03e-06 | 13 | runner-up `DECOY_B` padj=5.3e-5, `DECOY_A` padj=1.2e-4 -- both nominally significant, clear margin to TRUE_TOP; `VARIANCE_TRAP` correctly suppressed to rank 62/301, padj=0.83; verified count stays 13 even though only 12 feed the comparison |
-| As shipped | -- | -- | -- | -- | crashes on `np.float` before producing any output |
-| Fix only `np.float`, pandas stays 1.5.3 (branch A) | `NFAT890` (null gene) | 0.799 | 0.811 | -- | designed genes buried, nothing reaches significance |
-| Same, pandas upgraded to 2.2.3 (branch B) | `ZNF621` (null gene) | 0.712 | 0.892 | -- | different top gene, different values, still nothing significant |
-| Naive dedup: drop `sample_02` as a perceived duplicate (12 samples) | `TRUE_TOP` (right gene, coincidentally close stats if stats are also done right) | ~2.244 | ~1.0e-06 | 12 | numerically close to/matching the correct answer when everything else is done right, since it uses the same 12 batch1 samples -- the case the verified-count check exists specifically to catch |
-| ID confusion: `sample_02` mislabeled with `sample_2`'s condition (13 samples, 1 wrong label) | `DECOY_A` | 1.884 | 0.383 | 13 | one flipped label is enough at this n to both fail significance and change which gene ranks first |
-| Correct alignment, all 13 samples, no batch exclusion (batch-blind, naive stats) | `DECOY_B` | 2.090 | 1.08e-03 | 13 | alignment is genuinely right, verified count is genuinely 13, and the result is confidently significant -- only the batch judgment is missing |
-| Correct alignment + batch exclusion, plain per-gene t-test (no variance moderation) | `VARIANCE_TRAP` | 0.254 | 6.46e-07 | 13 | the closest wrong answer to correct: alignment right, batch judgment right, verified count right, and the result is *more* significant than the true answer -- only the statistical-method judgment is missing |
+| Scenario | top gene | log2FC | adjusted p | confounded_cohort | verified_ids | notes |
+|---|---|---|---|---|---|---|
+| **Correct (ID-based, cohort1's own analysis) -- locked ground truth** | `CACNA619` | 2.7049 | 3.60e-07 | `cohort2` | 24 | runner-up in cohort1: `FOX838` padj=8.9e-3, `PSMD475` padj=2.6e-2 -- both nominally significant, clear margin to the top gene |
+| As shipped | -- | -- | -- | -- | -- | crashes on `np.float` before producing any output |
+| Fix only `np.float`, pandas stays 1.5.3, pooled 24 samples, misaligned | `TMEM689` (unrelated null gene) | -0.386 | 0.875 | n/a | -- | nothing reaches significance |
+| Same, pandas upgraded to 2.2.3 | `RAB544` (unrelated null gene) | 0.961 | 0.927 | n/a | -- | different top gene, still nothing significant |
+| Correct alignment, all 24 pooled, no cohort split | `CACNA619` (right gene, contaminated stats) | 2.3066 | 5.64e-07 | -- | 24 | names the right gene but the fold-change is pulled toward the confounded cohort -- outside the log2FC tolerance |
+| Correct alignment, cohort split, but trusting cohort2's own result | `TUBB478` | 4.098 | 2.26e-03 | `cohort1` (wrong) | 24 | the closest wrong answer to correct: alignment right, split right, verified count right -- only the reconciliation judgment and its diagnostic field are wrong |
+| cohort2 alone, checked for replication in cohort1 | `TUBB478` in cohort1: rank 48/300, log2FC **-0.290** (opposite sign), raw p=0.13 | -- | -- | -- | -- | fails the replication check cleanly: wrong sign, not even nominally significant |
+| cohort1's top gene, checked for replication in cohort2 | `CACNA619` in cohort2: rank 2/300, log2FC **+1.908** (same sign), raw p=6.5e-04 | -- | -- | -- | -- | passes the replication check: same sign, nominally significant even though not BH-significant there |
 
-Every wrong scenario fails at least one verifier check. The "drop
-`sample_02`" and both "correct-except-one-judgment" rows are deliberately
-the closest-to-passing failures (each gets three of the four verifier
-checks "right" by construction) to confirm the verifier's checks are each
-independently load-bearing rather than redundant: `top_gene`/
-`log2_fold_change`/`adjusted_p_value` catch batch-blindness and the
-unmoderated test, `verified_matching_sample_ids` catches the naive-dedup
-case that the other three fields cannot.
+Every wrong scenario fails at least one verifier check. Pooling and
+cohort2-trusting are deliberately the two closest-to-passing failures
+(pooling gets the gene right; cohort2-trusting gets alignment, the split,
+and the verified count right) to confirm the verifier's checks are each
+independently load-bearing: `log2_fold_change` catches naive pooling,
+`confounded_cohort`/`top_gene`/`adjusted_p_value` together catch trusting
+the wrong cohort.
 
 Re-run the generator to reproduce: `python3 data_generation/generate_data.py`
 from the project root writes `data_generation/public/*.csv` (copy into
 `environment/data/` and `tests/data/`) and
 `data_generation/private/ground_truth.json` (authoring-only, never ships).
 
-## task-review findings and how they were addressed
-
-**First pass** (before the batch-confound addition) returned `Fail` with
-four findings:
-
-1. **`difficult`** -- the task read as "locate straightforward defects in a
-   small pipeline" rather than requiring genuine domain expertise. Addressed
-   (attempt 1) by adding the batch-confound judgment (layer 4 above).
-   `drug_discovery_pipeline.md` section 8a ("Data / ML / infrastructure")
-   also lists "fix a broken analysis pipeline and reproduce a previously
-   reported number" as a representative task for this category --
-   `task.toml`'s `category`/`tags` were updated to reflect that
-   classification instead of the stage-1 target-ID framing the placeholder
-   tags implied.
-2. **`environment_hygiene`** -- pytest/pytest-json-ctrf were baked into
-   `environment/Dockerfile` alongside the runtime deps. Addressed by
-   rewriting `tests/test_outputs.py` as a plain script with no
-   test-framework dependency (still numpy/pandas/scipy, which the analysis
-   itself legitimately needs) and updating `test.sh` to run it directly;
-   pytest is no longer vendored anywhere in this task.
-3. **`verification_explanation_quality`** -- needed a statement that
-   tolerances were checked against an alternative correct method, not only
-   against wrong-alignment scenarios. Addressed in the author-drafted
-   `verification_explanation`.
-4. **`difficulty_explanation_quality`** -- needed a sentence on data realism
-   and who does this work in practice. Addressed in the author-drafted
-   `difficulty_explanation`.
-
-**Second pass** (after the batch-confound addition, re-running
-`task-fixer`/`task-review`) returned `Fail` again with the same four
-findings. \#3 and \#4 were expected (the `task.toml` explanation fields had
-not yet been updated for the batch-confound addition at that point). \#2
-turned out to be a stale local checkout on the reviewer's machine, not a
-real regression -- confirmed by re-reading the current `environment/Dockerfile`,
-which already reflected the attempt-1 fix. \#1 recurring after a real,
-substantive addition was the important signal: excluding a single-sample
-batch is genuine domain knowledge, but it is also a single, well-known rule
--- once you know it, applying it here is not that hard, and the rubric's
-bar is "PhD in related fields" / "several years of domain expertise."
-Addressed (attempt 2) by adding the variance-moderation judgment (layer 5
-above), which requires understanding *why* per-gene variance estimates are
-unreliable at n=6 and how cross-gene shrinkage fixes that -- the actual
-statistical reasoning behind limma/DESeq2 for small-replicate genomics, not
-a single fact to know or not know.
-
-`task-fixer`/`task-review` have not yet been re-run against the
-variance-moderation version of the task; that is the next step.
-
 ## Open items for the human author
 
-- Re-run `./scripts/run-task-fixer.sh task` and
-  `./scripts/run-task-review.sh task` against the current state (variance
-  moderation added, data/ground truth re-locked again). Confirm you are on
-  the latest pushed commit first (`git log -1 --oneline`) -- the previous
-  `environment_hygiene` false-positive was caused by reviewing a stale
-  checkout.
-- Re-run the Docker smoke test (`./harbor_runner.py task --no-remote
-  --smoke-test`) against the current state -- the most recent confirmed-green
-  Docker run predates the variance-moderation addition. The venv-based
-  equivalent (solve.py against the new data, verified against the new
-  `test_outputs.py`, using only `environment/wheels/`) was re-run here and
-  passes.
-- `task.toml`'s three explanation fields describe the batch-confound design
-  but not yet the variance-moderation addition; another author pass is
-  needed there too.
-- `task-fixer`, `task-review`, the Harbor campaign, and `trajectory-review`
-  full end-to-end run against real Claude Code / Codex / Gemini trials
-  (the step 10 hard gate: every agent must fail at least 2 of 4 trials) has
-  not happened yet.
+- `instruction.md` and `task.toml` both describe the pre-redesign task
+  (single cohort, batch confound / variance moderation) and need a full
+  rewrite, not a patch -- the output schema itself changed (new
+  `confounded_cohort` field; `verified_matching_sample_ids` now targets
+  24). See the fact sheet the author will be handed separately.
+- Neither the Docker smoke test nor `task-fixer`/`task-review` have been
+  re-run against this structural rebuild. The venv-based equivalent
+  (solve.py against the new data, verified against the new
+  `test_outputs.py`, using only `environment/wheels/`, both pandas 1.5.3
+  and 2.2.3) was re-run here and passes.
+- Given the scope of this change, treat it as effectively a new task for
+  validation purposes: full local verification (done above), then the
+  standard fresh-agent screen before a full campaign run, since this is a
+  fundamentally different kind of difficulty than what was tested before.

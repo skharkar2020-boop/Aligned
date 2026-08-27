@@ -6,10 +6,11 @@ The environment ships a real, previously-working differential-expression
 pipeline (`/workspace/data/pipeline/`) that the agent is told is now
 producing results that don't match what was reported before. The task is
 not to write a DE pipeline from scratch; it is to run the one provided,
-diagnose why it no longer produces a trustworthy answer, and fix it. Three
-independent defects are layered into that pipeline, and fixing them in the
-wrong order (or only partially) each produces a different, non-crashing,
-individually plausible wrong answer rather than an error.
+diagnose why it no longer produces a trustworthy answer, and fix it.
+
+Three independent code defects are layered into that pipeline, and fixing
+them in the wrong order (or only partially) each produces a different,
+non-crashing, individually plausible wrong answer rather than an error:
 
 1. `pipeline/io.py` casts the expression matrix with `np.float`, an alias
    NumPy removed in 1.24. The pipeline crashes on the very first run. This
@@ -18,63 +19,53 @@ individually plausible wrong answer rather than an error.
    table once it's fixed.
 2. `pipeline/qc.py`'s per-sample QC report sorts the metadata table by
    `sample_id` as a string for its printout, and that sorted table is what
-   the rest of the run then uses as the canonical sample list. String
-   sorting of `sample_1 .. sample_12` is not numeric order
-   (`sample_10 < sample_2` lexicographically), so this silently reorders
-   the metadata relative to the expression matrix's own sample order.
+   the rest of the pipeline then uses as the canonical sample list. String
+   sorting of `sample_1 .. sample_24` is not numeric order (`sample_10`
+   sorts before `sample_2`), so this silently reorders the metadata
+   relative to the expression matrix's own sample order.
 3. `pipeline/align.py` combines expression and metadata by resetting both
    to a plain positional index and concatenating them side by side, rather
    than joining on `sample_id`. The expression matrix's columns are in
-   sequencer acquisition order (samples are randomized across lanes so lane
-   is not confounded with condition) and were never guaranteed to match the
-   metadata's row order to begin with, so this was unsafe even before (2)
-   made the metadata order diverge further. `align.py` also branches on the
-   installed pandas major version (a leftover from when the pipeline
-   supported pandas 1.x and 2.x side by side); neither branch is
-   index-based, so upgrading the pandas pin changes which wrong
-   permutation you get rather than fixing anything.
+   sequencer acquisition order (samples are randomized across lanes so
+   lane is not confounded with condition) and were never guaranteed to
+   match the metadata's row order to begin with, so this was unsafe even
+   before (2) made it worse. `align.py` also branches on the installed
+   pandas major version (a leftover from when the pipeline supported
+   pandas 1.x and 2.x side by side); neither branch is index-based, so
+   upgrading the pandas pin changes which wrong permutation you get rather
+   than fixing anything.
 
 The `assert combined.shape[0] == metadata.shape[0]` immediately after the
-merge is a real check that was already in the code, and it always passes --
-it confirms sample *count* survived the merge, not that each row's
+merge is a real check that was already in the code, and it always passes
+-- it confirms sample *count* survived the merge, not that each row's
 expression profile still belongs to the sample_id printed next to it.
 
-Two of the thirteen samples, `sample_2` and `sample_02`, are a genuine
-near-duplicate-looking pair: distinct biological replicates from two
-collection batches with different ID conventions, in opposite conditions.
-A fix that "cleans up" IDs by normalizing away things like leading zeros
-before joining, rather than joining on the literal `sample_id` string, will
-merge these two into one and silently corrupt the analysis in the same
-undetectable way as the original bug.
+Fixing the alignment is necessary but not sufficient. Even with every
+sample correctly ID-matched, the pipeline pools all 24 samples into one
+comparison, with no awareness that they come from two different cohorts.
+`sample_metadata.csv`'s `cohort` column separates `cohort1`
+(`sample_1`-`sample_12`) from `cohort2` (`sample_13`-`sample_24`), a later,
+independent confirmatory run. Analyzed separately, the two cohorts
+disagree: each produces a complete, internally consistent,
+non-crashing differential-expression result, and they name two different
+top genes. Pooling all 24 samples (the pipeline's default once alignment
+is fixed) does not resolve this -- it happens to still name the right gene
+in this dataset, but with a fold-change and p-value contaminated by mixing
+in the confounded cohort, which is why the verifier checks the actual
+numbers and not just the gene name.
 
-Fixing the alignment is necessary but not sufficient. `sample_02` is also
-the sole member of `batch` `batch2`; every other sample is `batch1`. A
-batch with exactly one sample is perfectly confounded with itself: nothing
-in the data can separate "this is a real biological effect in this sample"
-from "this is a technical artifact of processing it differently," because
-there is no second batch2 sample to compare it against. The scientifically
-defensible move is to run the differential-expression comparison on the
-samples from batches large enough to support that distinction -- here, the
-12 batch1 samples -- while still verifying `sample_02`'s identity like any
-other sample. Running the comparison on all 13 without accounting for this
-produces a different, still non-crashing, still nominally significant top
-gene: not an error, a wrong answer that happens to look complete.
-
-Correct alignment and the batch decision are still not sufficient. With
-only 6 samples per condition (once `sample_02` is correctly excluded), the
-pipeline's own per-gene Welch's t-test has a real statistical weakness:
-each gene's variance estimate comes from just 6 and 6 observations, which
-is itself a noisy quantity with only 6 df. A gene with no real condition
-effect can, purely by chance, land with an unusually small sample variance
-and produce an artificially tiny p-value -- indistinguishable, using that
-gene's own data alone, from a real, low-noise effect. This is the exact
-problem tools like limma (moderated t-statistics) and DESeq2 (dispersion
-shrinkage) exist to solve for small-replicate genomics: borrow information
-across the whole gene panel to get a more stable per-gene variance
-estimate, rather than trusting each gene's own 6-and-6 estimate in
-isolation. Running the pipeline's plain t-test on the correctly-joined,
-correctly-batch-filtered data still produces a wrong, confidently
-significant top gene, for this reason.
+The correct resolution requires recognizing which cohort's result is not
+trustworthy and why. `cohort2`'s control and treated samples were
+processed at different times (a real, staggered-processing/reagent-lot
+confound, confounded with condition only within that cohort), and its own
+top gene under this analysis does not hold up in `cohort1` at all -- not
+even a same-signed nominal signal. `cohort1`'s top gene, by contrast, does
+show up in `cohort2` too: weaker and short of formal significance in the
+noisier `cohort2`, but a real, same-signed, nominally significant effect
+-- unlike `cohort2`'s own top gene in `cohort1`. That asymmetry is the
+evidence: the gene whose effect only appears alongside a specific,
+identifiable confound is the artifact; the gene whose effect persists to
+some degree even without that confound is the real one.
 
 ## Steps
 
@@ -83,91 +74,60 @@ significant top gene, for this reason.
    `np.float64`); this is a real but unrelated packaging issue, not the
    substance of the task.
 2. Run it again. It now completes and prints a full ranked
-   differential-expression table -- but the top hit is not statistically
-   convincing (its adjusted p-value is not small) and, critically, nothing
-   in the run's output says so explicitly. Re-running after only swapping
-   the pandas version pinned in the environment changes which gene comes
-   out on top, which is a strong sign the alignment between expression
-   columns and metadata rows -- not the statistics -- is the thing that's
-   broken.
+   differential-expression table -- but re-running after only swapping the
+   pandas version pinned in the environment changes which gene comes out
+   on top, a strong sign the alignment between expression columns and
+   metadata rows, not the statistics, is broken.
 3. Trace the pipeline's own merge step (`align.py`) and the metadata
    handling that feeds it (`qc.py`) rather than trusting the shape
    assertion. Confirm, sample by sample, that the `sample_id` a row's
-   expression profile came from is the same `sample_id` its condition label
-   came from -- shape equality does not establish this.
-4. Reimplement the merge so it joins the expression matrix's columns to the
-   metadata's `sample_id` values explicitly (e.g. `expr[metadata["sample_id"]]`
-   or an explicit ID-keyed merge), never by resetting both to a positional
-   index first. Keep `sample_2` and `sample_02` as the two distinct IDs they
-   are; do not normalize, fuzzy-match, or deduplicate sample identifiers.
-5. Before reporting, explicitly count how many of the 13 samples have their
-   expression-matrix identity and metadata `sample_id` confirmed equal at
-   the row used in the analysis (not just that the row counts match) and
-   report that count alongside the result. A pipeline that is really
-   joining by ID gets all 13; a pipeline still joining by position, however
-   it was patched, will not. This count is independent of step 6 below --
-   every sample gets ID-verified regardless of whether it ends up usable
-   for the statistical comparison.
-6. Check each sample's `batch`. `sample_02` is the only member of its
-   batch; a batch of one cannot be separated from a real condition effect.
-   Exclude it from the differential-expression comparison for that reason
-   (not because its ID is ambiguous -- it already passed step 5) and use
-   the 12 batch1 samples for the comparison itself.
-7. Recompute log2(CPM + 1) per sample on the correctly joined,
-   batch-filtered table. Do not stop at the pipeline's own plain per-gene
-   t-test: with only 6 samples per group, shrink each gene's variance
-   estimate toward the panel-wide typical variance before computing the
-   test statistic (a moderated t-test, in the spirit of limma's
-   empirical-Bayes approach -- a fixed, reasonable prior weight is a
-   defensible simplification of fitting one; the conclusion is not
-   sensitive to the exact value). Apply Benjamini-Hochberg FDR correction
-   to the resulting p-values and take the gene with the smallest adjusted
-   p-value as the top hit.
+   expression profile came from is the same `sample_id` its condition
+   label came from.
+4. Reimplement the merge so it joins the expression matrix's columns to
+   the metadata's `sample_id` values explicitly, never by resetting both
+   to a positional index first.
+5. Before reporting, explicitly count how many of the 24 samples have
+   their expression-matrix identity and metadata `sample_id` confirmed
+   equal at the row used in the analysis, and report that count alongside
+   the result.
+6. Notice the `cohort` column and split the analysis by cohort instead of
+   pooling. Run the same per-gene differential-expression procedure
+   independently within `cohort1` and within `cohort2`.
+7. Compare the two cohorts' top genes. For each cohort's own top gene,
+   check whether it shows any real, same-signed signal in the *other*
+   cohort (a much lower bar than formal significance there, since one
+   cohort is noisier). The cohort whose top gene does not clear even that
+   bar in the other cohort is the confounded one; exclude its result.
 8. Write `result.json` with the top gene's symbol, its log2 fold-change
-   (treated vs. control), its BH-adjusted p-value, and the verified sample
-   count (13, from step 5 -- not the 12 used in step 7), using
-   `DATA_DIR`/`OUTPUT_DIR`.
+   and BH-adjusted p-value from the *trustworthy* cohort's own analysis,
+   the total verified sample count (24, from step 5), and which cohort was
+   identified as confounded, using `DATA_DIR`/`OUTPUT_DIR`.
 
 ## Validation performed
 
 Re-running the fixed pipeline against the same input files under two
 different installed pandas major versions (1.x and 2.x) reproduces
-identical output -- confirming the fix is genuinely ID-based rather than
-incidentally correct for one pandas version's default behavior. The
-reference result was cross-checked against an independent, from-scratch
-recomputation (same CPM/moderated-t/BH procedure, implemented separately
-from both the pipeline module and solve.py) that joins on `sample_id`
-directly from the two raw input files, applies the same batch filter, and
-applies the same variance moderation; the two agree exactly. The
-moderation prior weight was swept from 2 to 20 to confirm the top gene and
-its statistics stay within the verifier's tolerance across that whole
-range -- the conclusion depends on moderating at all, not on the exact
-prior weight chosen.
+identical output. The reference result was cross-checked against an
+independent, from-scratch recomputation (same CPM/t-test/BH procedure and
+replication check, implemented separately from both the pipeline module
+and solve.py) that joins on `sample_id` directly from the two raw input
+files; the two agree exactly.
 
 Several wrong-but-plausible scenarios were run against the same data as an
 internal check that the verifier would actually catch them, none of which
 crash or produce a NaN:
-- Both misalignment branches (pandas<2 and pandas>=2, after only fixing the
-  crash) land on two different null genes, neither statistically
+- Both misalignment branches (pandas<2 and pandas>=2, after only fixing
+  the crash) land on unrelated null genes, neither statistically
   significant.
-- Dropping `sample_02` as a perceived duplicate of `sample_2` reports only
-  12 verified samples instead of 13.
-- Mislabeling `sample_02`'s condition (the failure mode of matching it to
-  `sample_2`'s metadata row) knocks the true top gene out of first place
-  entirely, with nothing reaching significance.
-- Running the comparison on all 13 correctly-ID-verified samples --
-  correct alignment, but without the batch-2 exclusion -- reports a
-  *different* gene as top, at an adjusted p-value (~1e-3) that clears an
-  unwary "is it significant" check on its own.
-- Running the pipeline's own plain per-gene t-test (no variance
-  moderation) on the correctly joined, correctly batch-filtered 12 samples
-  reports a different gene as top, at an adjusted p-value even smaller
-  than the true top gene's -- a null gene whose 6-and-6 sample variance is,
-  by construction, unusually tight. This is the closest wrong answer to
-  correct: alignment is genuinely right, the batch judgment is genuinely
-  right, and the result is confidently, validly significant by every
-  check except that the statistical method itself is not robust enough
-  for this sample size.
+- Pooling all 24 correctly-ID-verified samples without splitting by
+  cohort reports the right gene but a fold-change contaminated by the
+  confounded cohort (2.31 vs. the correct 2.70 -- outside tolerance).
+- Trusting `cohort2`'s own result (correct alignment, correct per-sample
+  verification, but the wrong cohort) reports a different, still
+  confidently significant top gene, and reports the wrong
+  `confounded_cohort` as well -- the closest wrong answer to correct on
+  every field except the one that actually required cross-cohort
+  reasoning.
 
 All are visibly different from the locked reference values on at least one
 checked field.

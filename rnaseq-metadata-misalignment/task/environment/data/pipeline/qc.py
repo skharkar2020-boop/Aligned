@@ -20,6 +20,6 @@ def filter_and_report_samples(metadata: pd.DataFrame) -> pd.DataFrame:
     report_order = passed.sort_values("sample_id")
     print(f"[QC] {len(report_order)} samples passed QC:")
     for _, row in report_order.iterrows():
-        print(f"  {row['sample_id']}: {row['condition']} ({row['batch']})")
+        print(f"  {row['sample_id']}: {row['condition']} ({row['cohort']})")
 
     return report_order

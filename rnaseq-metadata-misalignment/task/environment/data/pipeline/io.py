@@ -17,5 +17,5 @@ def load_expression_matrix(path: Path) -> pd.DataFrame:
 
 
 def load_metadata(path: Path) -> pd.DataFrame:
-    """Load the per-sample metadata table (sample_id, condition, batch, qc_pass)."""
+    """Load the per-sample metadata table (sample_id, condition, cohort, qc_pass)."""
     return pd.read_csv(path)

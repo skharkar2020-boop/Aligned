@@ -14,11 +14,17 @@ author_email = "skharkar2020@gmail.com"
 author_organization = "Aligned"
 category = "data-ml-infrastructure"
 tags = ["rna-seq", "differential-expression", "data-pipeline-debugging", "sample-metadata-alignment", "pandas", "silent-data-corruption"]
-expert_time_estimate_hours = 12.0
+expert_time_estimate_hours = 12.0 # REPLACE: reconsider -- the task is now materially bigger (two cohorts, cross-cohort reconciliation) than when this was set.
 
-difficulty_explanation = "The trap here is that the pipeline's own sanity check doesn't actually check the thing that matters. assert combined.shape[0] == metadata.shape[0] just confirms the row counts line up, and they do, every time, whether the join is correct or completely scrambled. So the assertion passes regardless, and there's nothing in the pipeline's own output that tells you sample identities got mixed up. On top of that, the task doesn't hand you the real problem right away. The first thing you hit is a genuine, unrelated crash: np.float doesn't exist anymore in the installed numpy, and fixing it gets you a clean run, which is exactly the kind of thing that makes you think you're done. You're not. That 'success' is misleading, because depending on which pandas version happens to be active, you get one of two different wrong but plausible top genes. So re-running the pipeline after a change doesn't move you toward the right answer, it just swaps in a different wrong one. Getting out of this requires the instinct a computational biologist would actually bring to auditing a pipeline before greenlighting a compound: not trusting a clean run, digging into how qc.py sorts its report and how align.py merges its data, and actually verifying sample identity instead of taking a shape match as proof."
-solution_explanation = "Run the pipeline as shipped and it crashes almost immediately on a deprecated np.float call; fix that first. But the run that follows is the real trap: it completes without error, and it's still wrong. Getting to the actual bug means not trusting that completion and instead tracing two things: how qc.py sorts its report, and how align.py merges data by position instead of by key. The fix is to rejoin the expression columns to the metadata explicitly on sample_id, never by row position, and to be careful that sample_02 doesn't get collapsed into sample_2 along the way, which a careless join will happily do. The final answer should report the top differentially-expressed gene alongside an explicit per-sample ID verification count, proof the identities were actually checked, not just an assumption carried over from a shape that happened to match."
-verification_explanation = "test_outputs.py doesn't trust the pipeline's own math. It recomputes everything independently from its own copy of the data, using a Welch's t-test and BH-FDR correction written from scratch, separate from pipeline/stats.py. The log2_fold_change check is tight (±0.15) because it's just a difference of group means, a quantity that shouldn't shift with method, and every wrong-alignment case seen while building this task was off by more than 1.4, so a tight band is both realistic and necessary to catch subtler mistakes. The adjusted_p_value check asks for clear significance (<=1e-3) plus a wide log-scale allowance; it doesn't need to be strict, because every wrong scenario measured during authoring landed at >=0.3, orders of magnitude off, so even a loose band still catches them. And verified_matching_sample_ids has to equal exactly 13, because anything less means some sample was never actually confirmed, just assumed."
+# REPLACE all three: the task structure changed (single cohort -> two
+# cohorts that disagree, new confounded_cohort output field). The previous
+# explanations described the pre-redesign task and are no longer accurate.
+# Write these in your own voice from task/solution/process.md and the
+# calibration record in task/README.md. Do not have an LLM write these --
+# see the note at the top of instruction.md.
+difficulty_explanation = "REPLACE: name the scientific/reasoning bottleneck (two independent cohorts each give a complete, individually defensible, non-crashing analysis that disagree on the top gene; resolving it requires recognizing why one cohort's evidence doesn't generalize, not looking up a rule), why it's genuinely hard (three layered code defects gate reaching the reconciliation step at all, and naive pooling of both cohorts still looks plausible), and who does this work (a computational biologist reconciling conflicting replicate results before a go/no-go call)."
+solution_explanation = "REPLACE: summarize solve.py's actual strategy -- fix the crash and the alignment bugs, split by cohort instead of pooling, run the same DE procedure independently per cohort, check whether each cohort's own top gene shows a same-signed nominal signal in the other cohort, and report the trustworthy cohort's result plus which cohort was confounded and why."
+verification_explanation = "REPLACE: describe the independent per-cohort recomputation and replication check in test_outputs.py, and justify the log2_fold_change/adjusted_p_value tolerances against the specific wrong-scenario margins recorded in task/README.md's calibration table (naive pooling gets the gene right but the magnitude wrong; trusting the confounded cohort fails on confounded_cohort/top_gene/adjusted_p_value together)."
 
 [verifier]
 timeout_sec = 300.0
@@ -38,6 +44,6 @@ gpus = 0
 # Client policy: the Oracle and the agent trials both run with public network
 # in case the agent wants to check package documentation or pip install an
 # alternative library version while debugging. The toolchain itself is not
-# fetched at run time: numpy/pandas/scipy/pytest are vendored in wheels/ and
+# fetched at run time: numpy/pandas/scipy are vendored in wheels/ and
 # installed offline at build time (see environment/Dockerfile).
 network_mode = "public"
