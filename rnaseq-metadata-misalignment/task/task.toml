@@ -12,8 +12,8 @@ description = "Reproduce a trustworthy top differentially-expressed gene from a 
 author_name = "Shalmalee Kharkar"
 author_email = "skharkar2020@gmail.com"
 author_organization = "Aligned"
-category = "scientific-computing"
-tags = ["scientific-computing", "transcriptomics", "differential-expression", "data-quality", "python", "pytest"]
+category = "data-ml-infrastructure"
+tags = ["rna-seq", "differential-expression", "data-pipeline-debugging", "sample-metadata-alignment", "pandas", "silent-data-corruption"]
 expert_time_estimate_hours = 12.0
 
 difficulty_explanation = "The trap here is that the pipeline's own sanity check doesn't actually check the thing that matters. assert combined.shape[0] == metadata.shape[0] just confirms the row counts line up, and they do, every time, whether the join is correct or completely scrambled. So the assertion passes regardless, and there's nothing in the pipeline's own output that tells you sample identities got mixed up. On top of that, the task doesn't hand you the real problem right away. The first thing you hit is a genuine, unrelated crash: np.float doesn't exist anymore in the installed numpy, and fixing it gets you a clean run, which is exactly the kind of thing that makes you think you're done. You're not. That 'success' is misleading, because depending on which pandas version happens to be active, you get one of two different wrong but plausible top genes. So re-running the pipeline after a change doesn't move you toward the right answer, it just swaps in a different wrong one. Getting out of this requires the instinct a computational biologist would actually bring to auditing a pipeline before greenlighting a compound: not trusting a clean run, digging into how qc.py sorts its report and how align.py merges its data, and actually verifying sample identity instead of taking a shape match as proof."
