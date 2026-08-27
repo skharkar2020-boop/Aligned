@@ -9,9 +9,9 @@ name = "aligned/metabolite-decoy-trap"
 description = "Nominate which of a drug candidate's parent compound and two metabolites (M1, M2) is the true pharmacodynamic driver, from sparse PK/PD data spanning single-dose and multi-dose steady-state cohorts."
 
 [metadata]
-author_name = "TODO: author name"
+author_name = "Shalmalee Kharkar"
 author_email = "skharkar2020@gmail.com"
-author_organization = "TODO: organization"
+author_organization = "Aligned"
 category = "scientific-computing"
 tags = ["scientific-computing", "data-analysis", "python", "pytest", "pharmacokinetics", "pharmacodynamics"]
 expert_time_estimate_hours = 4.0 # TODO: confirm; my draft estimate for a clinical pharmacologist to compute per-subject AUC, check exposure-response evidence across both dosing regimens, and write up the nomination
