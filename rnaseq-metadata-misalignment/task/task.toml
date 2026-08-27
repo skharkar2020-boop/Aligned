@@ -5,11 +5,8 @@ artifacts = [
 ]
 
 [task]
-# REPLACE: name/description are part of the hand-authored task voice --
-# see the note at the top of instruction.md for why this file is left as a
-# skeleton for the human author rather than filled in here.
-name = "aligned/replace_me_rnaseq-metadata-misalignment"
-description = "REPLACE: one-line description of the practitioner decision this task represents."
+name = "aligned/rnaseq-metadata-misalignment"
+description = "Reproduce a trustworthy top differentially-expressed gene from a compound-response RNA-seq pipeline whose output can no longer be taken at face value."
 
 [metadata]
 author_name = "Replace with author name"
@@ -19,13 +16,9 @@ category = "scientific-computing"
 tags = ["scientific-computing", "transcriptomics", "differential-expression", "data-quality", "python", "pytest"]
 expert_time_estimate_hours = 2.0 # REPLACE: set from your own judgment of the reference workflow, not agent runtime.
 
-# REPLACE all three: write these in your own voice from the reference
-# workflow you actually validated (see task/solution/process.md and the
-# empirical calibration notes below instruction.md's draft). Do not have an
-# LLM write these -- see the note at the top of instruction.md.
-difficulty_explanation = "REPLACE: name the scientific/engineering decision bottleneck (silent sample/label misalignment surviving a shape-only sanity check), why the layered bugs make it hard for an expert to localize (a real but unrelated crash first, then two independently-plausible wrong alignments depending on an unrelated dependency pin), and who would actually do this work (a computational biologist auditing a compound-response RNA-seq pipeline before advancing a candidate)."
-solution_explanation = "REPLACE: summarize solve.py's actual strategy -- run the shipped pipeline, fix the np.float crash, trace the QC-report sort and the positional merge in align.py, rejoin expression columns to metadata sample_id explicitly, and report the top gene with an explicit per-sample ID verification count."
-verification_explanation = "REPLACE: describe the independent recomputation in test_outputs.py and justify the log2 fold-change and adjusted p-value tolerances against the wrong-alignment scenarios actually measured during authoring (see task/tests/test_outputs.py comments for the specific margins)."
+difficulty_explanation = "The trap here is that the pipeline's own sanity check doesn't actually check the thing that matters. assert combined.shape[0] == metadata.shape[0] just confirms the row counts line up, and they do, every time, whether the join is correct or completely scrambled. So the assertion passes regardless, and there's nothing in the pipeline's own output that tells you sample identities got mixed up. On top of that, the task doesn't hand you the real problem right away. The first thing you hit is a genuine, unrelated crash: np.float doesn't exist anymore in the installed numpy, and fixing it gets you a clean run, which is exactly the kind of thing that makes you think you're done. You're not. That 'success' is misleading, because depending on which pandas version happens to be active, you get one of two different wrong but plausible top genes. So re-running the pipeline after a change doesn't move you toward the right answer, it just swaps in a different wrong one. Getting out of this requires the instinct a computational biologist would actually bring to auditing a pipeline before greenlighting a compound: not trusting a clean run, digging into how qc.py sorts its report and how align.py merges its data, and actually verifying sample identity instead of taking a shape match as proof."
+solution_explanation = "Run the pipeline as shipped and it crashes almost immediately on a deprecated np.float call; fix that first. But the run that follows is the real trap: it completes without error, and it's still wrong. Getting to the actual bug means not trusting that completion and instead tracing two things: how qc.py sorts its report, and how align.py merges data by position instead of by key. The fix is to rejoin the expression columns to the metadata explicitly on sample_id, never by row position, and to be careful that sample_02 doesn't get collapsed into sample_2 along the way, which a careless join will happily do. The final answer should report the top differentially-expressed gene alongside an explicit per-sample ID verification count, proof the identities were actually checked, not just an assumption carried over from a shape that happened to match."
+verification_explanation = "test_outputs.py doesn't trust the pipeline's own math. It recomputes everything independently from its own copy of the data, using a Welch's t-test and BH-FDR correction written from scratch, separate from pipeline/stats.py. The log2_fold_change check is tight (±0.15) because it's just a difference of group means, a quantity that shouldn't shift with method, and every wrong-alignment case seen while building this task was off by more than 1.4, so a tight band is both realistic and necessary to catch subtler mistakes. The adjusted_p_value check asks for clear significance (<=1e-3) plus a wide log-scale allowance; it doesn't need to be strict, because every wrong scenario measured during authoring landed at >=0.3, orders of magnitude off, so even a loose band still catches them. And verified_matching_sample_ids has to equal exactly 13, because anything less means some sample was never actually confirmed, just assumed."
 
 [verifier]
 timeout_sec = 300.0
