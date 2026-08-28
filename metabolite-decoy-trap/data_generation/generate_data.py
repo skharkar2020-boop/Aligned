@@ -81,7 +81,7 @@ DOSE_LOW = 50.0
 DOSE_HIGH = 150.0
 N_SUBJECTS_PER_CELL = 8  # 4 cells (dose x regimen) x 8 = 32 subjects
 
-TIME_OFFSETS_SINGLE = [0.25, 0.5, 1, 2, 4, 6, 8, 12, 16, 24, 36, 48]
+TIME_OFFSETS_SINGLE = [0.25, 0.5, 1, 2, 4, 6, 8, 10, 12, 16, 24, 36, 48]
 # Multi-dose offsets are relative to the LAST dose; 0.0 is a genuine
 # observed pre-dose trough sample (not an assumption). 0.25-12h cover the
 # steady-state dosing interval (tau=12h); 16/24/36/48h are a terminal tail
