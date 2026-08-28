@@ -40,32 +40,86 @@ merge is a real check that was already in the code, and it always passes
 -- it confirms sample *count* survived the merge, not that each row's
 expression profile still belongs to the sample_id printed next to it.
 
-Fixing the alignment is necessary but not sufficient. Even with every
-sample correctly ID-matched, the pipeline pools all 24 samples into one
-comparison, with no awareness that they come from two different cohorts.
-`sample_metadata.csv`'s `cohort` column separates `cohort1`
-(`sample_1`-`sample_12`) from `cohort2` (`sample_13`-`sample_24`), a later,
-independent confirmatory run. Analyzed separately, the two cohorts
-disagree: each produces a complete, internally consistent,
-non-crashing differential-expression result, and they name two different
-top genes. Pooling all 24 samples (the pipeline's default once alignment
-is fixed) does not resolve this -- it happens to still name the right gene
-in this dataset, but with a fold-change and p-value contaminated by mixing
-in the confounded cohort, which is why the verifier checks the actual
-numbers and not just the gene name.
+## Why fixing the alignment is necessary but not sufficient
 
-The correct resolution requires recognizing which cohort's result is not
-trustworthy and why. `cohort2`'s control and treated samples were
-processed at different times (a real, staggered-processing/reagent-lot
-confound, confounded with condition only within that cohort), and its own
-top gene under this analysis does not hold up in `cohort1` at all -- not
-even a same-signed nominal signal. `cohort1`'s top gene, by contrast, does
-show up in `cohort2` too: weaker and short of formal significance in the
-noisier `cohort2`, but a real, same-signed, nominally significant effect
--- unlike `cohort2`'s own top gene in `cohort1`. That asymmetry is the
-evidence: the gene whose effect only appears alongside a specific,
-identifiable confound is the artifact; the gene whose effect persists to
-some degree even without that confound is the real one.
+Even with every sample correctly ID-matched, `sample_metadata.csv`'s
+`cohort` column separates `cohort1` (`sample_1`-`sample_12`, the original
+run) from `cohort2` (`sample_13`-`sample_24`, a later, independent
+confirmatory run). The pipeline pools all 24 samples into one comparison
+by default, with no cohort awareness at all -- and several plausible ways
+of handling the two cohorts each name a different top gene:
+
+- **Naive pooled DE** (all 24 samples, cohort-blind): still names the
+  correct gene here, but its fold-change and p-value are contaminated by
+  mixing a strong, low-noise cohort1 effect with a much weaker cohort2
+  effect for the same gene. The number does not match either cohort's own
+  honest estimate and falls outside the verifier's tolerance.
+- **Trusting cohort2 alone** (defensible on its face -- it's the later,
+  "confirmatory" run, and its own top hit is dramatically significant):
+  names a *different* gene, one with a huge effect confined entirely to
+  cohort2 and no support at all in cohort1.
+- **A sign-blind combined-p meta-analysis** (a real, common mistake:
+  plugging each candidate gene's two independent cohort-level p-values
+  into Fisher's method without first checking that the two cohorts agree
+  on effect *direction*): lands on the same wrong gene as trusting cohort2
+  alone. That gene's extremely small cohort2 p-value dominates the
+  combination even though cohort1 shows essentially no effect (and a
+  slightly opposite sign) -- the combination never checked whether the two
+  cohorts were actually telling the same story.
+- **Preferring whichever gene replicates most *consistently*** across
+  cohorts, without also weighing how *strong* that evidence is: promotes a
+  real, moderate, highly-consistent effect over a gene with a stronger
+  overall case (a much stronger cohort1 effect that is real, but weaker
+  and closer to noise, in cohort2). Consistency alone is not sufficient
+  when it comes at the cost of materially weaker evidence.
+
+None of these four are coding errors -- each is a real, internally
+consistent, non-crashing statistical analysis of correctly-ID-aligned
+data. That is what makes reconciling them a judgment call rather than a
+lookup.
+
+## The correct resolution
+
+1. Run the same per-gene DE procedure (log2-CPM, Welch's t-test, BH-FDR)
+   independently within `cohort1` and within `cohort2`. Never pool.
+2. For any gene near the top of either cohort's own ranking, require that
+   it also show a *nominally* significant (raw p < 0.05 -- not
+   BH-adjusted; cohort2 is noisier, so a real effect is not expected to
+   survive multiple-testing correction there), *same-signed* effect
+   independently in the **other** cohort too. A gene whose apparent effect
+   is confined to one cohort and shows nothing (not even a weak,
+   same-direction nominal signal) in the other has failed to replicate --
+   that asymmetry, not a bigger number, is the signature of a
+   cohort-specific technical artifact rather than biology. The rejected
+   gene here loads heavily on a latent factor that only carries a real
+   signal within `cohort2`; nothing in the public data names that factor
+   directly, but genes that cluster together on it (moving together
+   within `cohort2`, flat in `cohort1`) are visible in the expression data
+   itself for anyone who looks for that structure (e.g. correlating
+   candidate genes against each other within a cohort, or a quick PCA).
+3. More than one gene can pass that replication bar -- real biological
+   effects are not required to be identical in magnitude across cohorts,
+   and moderate heterogeneity (stronger in one cohort, weaker but real in
+   the other, same direction) is expected, not disqualifying. When more
+   than one candidate clears the bar, prefer the one with the stronger
+   *combined* evidence (e.g. Fisher's method on the two nominal p-values,
+   now legitimately applicable because direction agreement has already
+   been confirmed) over the one that is merely the most uniform across
+   cohorts. A smaller, very consistent effect is not automatically the
+   safer answer if a materially stronger, still-replicating effect is
+   available.
+4. Report the surviving gene's own result from whichever cohort gives it
+   the stronger (smaller p-value) evidence, alongside both cohorts'
+   individual fold-changes and a categorical description of how they
+   relate to each other (consistent, or stronger in one cohort than the
+   other), which cohort's own top hit was rejected and why, and the
+   verified per-sample ID count.
+5. A prior report exists on disk naming the same gene from an earlier,
+   much smaller, single-cohort pilot. Its numbers do not match this
+   dataset's independently recomputed result (different n, no
+   confirmatory cohort) and are not sufficient evidence on their own --
+   the analysis has to be reproduced from the current data, not copied
+   from that file.
 
 ## Steps
 
@@ -88,20 +142,26 @@ some degree even without that confound is the real one.
    to a positional index first.
 5. Before reporting, explicitly count how many of the 24 samples have
    their expression-matrix identity and metadata `sample_id` confirmed
-   equal at the row used in the analysis, and report that count alongside
-   the result.
+   equal at the row used in the analysis.
 6. Notice the `cohort` column and split the analysis by cohort instead of
-   pooling. Run the same per-gene differential-expression procedure
-   independently within `cohort1` and within `cohort2`.
-7. Compare the two cohorts' top genes. For each cohort's own top gene,
-   check whether it shows any real, same-signed signal in the *other*
-   cohort (a much lower bar than formal significance there, since one
-   cohort is noisier). The cohort whose top gene does not clear even that
-   bar in the other cohort is the confounded one; exclude its result.
-8. Write `result.json` with the top gene's symbol, its log2 fold-change
-   and BH-adjusted p-value from the *trustworthy* cohort's own analysis,
-   the total verified sample count (24, from step 5), and which cohort was
-   identified as confounded, using `DATA_DIR`/`OUTPUT_DIR`.
+   pooling. Run the same DE procedure independently within `cohort1` and
+   within `cohort2`.
+7. For each cohort's own top candidates, check whether they hold up
+   (nominal significance, same sign) in the *other* cohort. Reject
+   whichever prominent candidate fails that check, and identify why its
+   evidence is concentrated in one cohort (look for other genes that move
+   together with it, confined to that same cohort -- a latent technical
+   axis, not biology).
+8. Among genes that do replicate in both cohorts, prefer the one with the
+   stronger combined evidence over the one that is merely the most
+   uniform, unless the "stronger" candidate is actually the rejected
+   artifact from step 7.
+9. Write `result.json` with the surviving gene's symbol, its log2
+   fold-change and BH-adjusted p-value from its stronger-evidence cohort,
+   which analysis strategy was used, both cohorts' own fold-changes for
+   that gene, a categorical heterogeneity assessment, the verified sample
+   count, which competing gene was rejected, and a short rationale --
+   using `DATA_DIR`/`OUTPUT_DIR`.
 
 ## Validation performed
 
@@ -115,19 +175,20 @@ files; the two agree exactly.
 
 Several wrong-but-plausible scenarios were run against the same data as an
 internal check that the verifier would actually catch them, none of which
-crash or produce a NaN:
-- Both misalignment branches (pandas<2 and pandas>=2, after only fixing
-  the crash) land on unrelated null genes, neither statistically
-  significant.
-- Pooling all 24 correctly-ID-verified samples without splitting by
-  cohort reports the right gene but a fold-change contaminated by the
-  confounded cohort (2.31 vs. the correct 2.70 -- outside tolerance).
-- Trusting `cohort2`'s own result (correct alignment, correct per-sample
-  verification, but the wrong cohort) reports a different, still
-  confidently significant top gene, and reports the wrong
-  `confounded_cohort` as well -- the closest wrong answer to correct on
-  every field except the one that actually required cross-cohort
-  reasoning.
+crash or produce a NaN -- see task/README.md's calibration table for the
+actual numbers:
+
+- Naive pooled DE names the correct gene but a contaminated fold-change
+  and adjusted p-value, both outside tolerance.
+- Trusting `cohort2` alone names a different gene entirely, with
+  everything about it (fold-changes, heterogeneity label, rejected gene)
+  wrong.
+- A sign-blind combined-p meta-analysis lands on the same wrong gene as
+  trusting `cohort2` alone, for a different (but equally plausible)
+  reason.
+- Preferring the most cross-cohort-consistent gene over the one with
+  materially stronger evidence names a real, replicating, but
+  weaker-evidence gene -- wrong on every numeric field.
 
 All are visibly different from the locked reference values on at least one
-checked field.
+checked field, and each fails for a different underlying reason.

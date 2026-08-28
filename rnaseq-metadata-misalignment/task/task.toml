@@ -14,17 +14,23 @@ author_email = "skharkar2020@gmail.com"
 author_organization = "Aligned"
 category = "data-ml-infrastructure"
 tags = ["rna-seq", "differential-expression", "data-pipeline-debugging", "sample-metadata-alignment", "pandas", "silent-data-corruption"]
-expert_time_estimate_hours = 12.0 # REPLACE: reconsider -- the task is now materially bigger (two cohorts, cross-cohort reconciliation) than when this was set.
+expert_time_estimate_hours = 14.0 # REPLACE: reconsider again -- round 4 adds a latent-factor diagnosis and an evidence-strength-vs-consistency tradeoff on top of round 3's cross-cohort reconciliation.
 
-# REPLACE all three: the task structure changed (single cohort -> two
-# cohorts that disagree, new confounded_cohort output field). The previous
-# explanations described the pre-redesign task and are no longer accurate.
-# Write these in your own voice from task/solution/process.md and the
-# calibration record in task/README.md. Do not have an LLM write these --
-# see the note at the top of instruction.md.
-difficulty_explanation = "REPLACE: name the scientific/reasoning bottleneck (two independent cohorts each give a complete, individually defensible, non-crashing analysis that disagree on the top gene; resolving it requires recognizing why one cohort's evidence doesn't generalize, not looking up a rule), why it's genuinely hard (three layered code defects gate reaching the reconciliation step at all, and naive pooling of both cohorts still looks plausible), and who does this work (a computational biologist reconciling conflicting replicate results before a go/no-go call)."
-solution_explanation = "REPLACE: summarize solve.py's actual strategy -- fix the crash and the alignment bugs, split by cohort instead of pooling, run the same DE procedure independently per cohort, check whether each cohort's own top gene shows a same-signed nominal signal in the other cohort, and report the trustworthy cohort's result plus which cohort was confounded and why."
-verification_explanation = "REPLACE: describe the independent per-cohort recomputation and replication check in test_outputs.py, and justify the log2_fold_change/adjusted_p_value tolerances against the specific wrong-scenario margins recorded in task/README.md's calibration table (naive pooling gets the gene right but the magnitude wrong; trusting the confounded cohort fails on confounded_cohort/top_gene/adjusted_p_value together)."
+# REPLACE all three: the task structure changed again (confounded_cohort
+# field removed; analysis_strategy/cohort1_log2_fold_change/
+# cohort2_log2_fold_change/heterogeneity_assessment/
+# rejected_competing_gene/rationale added). Neither cohort can be
+# discarded wholesale anymore -- both carry real evidence for the true
+# gene, and the competing gene's technical signature is latent, not an
+# explicit column. The previous explanations described round 3 (one
+# cohort obviously confounded, the other obviously clean) and are no
+# longer accurate. Write these in your own voice from
+# task/solution/process.md and the calibration record in task/README.md.
+# Do not have an LLM write these -- see the note at the top of
+# instruction.md.
+difficulty_explanation = "REPLACE: name the scientific/reasoning bottleneck (the true gene has a real effect in both cohorts with ordinary effect-size heterogeneity, not a clean single-cohort signal, so no cohort can just be thrown out; a competing gene's much larger, cohort2-only effect is driven by a latent factor that has to be inferred from expression structure, not read off a column; and a third gene is genuinely more consistent across cohorts but has weaker overall evidence, forcing an explicit tradeoff rather than a lookup), why it's genuinely hard (three layered code defects gate reaching the reconciliation step at all, and naive pooling, trusting one cohort, and a sign-blind meta-analysis each look like a reasonable finished analysis and each land on a different answer), and who does this work (a computational biologist reconciling two replicate cohorts and a plausible-but-technical hit before a go/no-go call)."
+solution_explanation = "REPLACE: summarize solve.py's actual strategy -- fix the crash and the alignment bugs, split by cohort instead of pooling, run the same DE procedure independently per cohort, require nominal same-signed significance independently in both cohorts before trusting a candidate, prefer the strongest combined evidence (not just the most consistent) among candidates that clear that bar, and report which competing gene was rejected and why its evidence doesn't generalize."
+verification_explanation = "REPLACE: describe the independent per-cohort recomputation and replication-plus-evidence-strength selection in test_outputs.py, and justify the tolerances against the specific wrong-scenario margins recorded in task/README.md's calibration table (naive pooling gets the gene right but both numeric fields wrong; trusting cohort2 alone and the sign-blind meta-analysis both fail top_gene, cohort1_log2_fold_change, heterogeneity_assessment, and rejected_competing_gene together; preferring consistency over strength names a real gene that still fails every numeric field)."
 
 [verifier]
 timeout_sec = 300.0
