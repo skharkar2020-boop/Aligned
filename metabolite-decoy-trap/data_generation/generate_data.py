@@ -70,7 +70,7 @@ PARENT_SCALE_PER_DOSE = 1.10
 # drive Cmax and Tmax) are deliberately noisier than its *scale* parameter,
 # so a subject's M2 Cmax does not closely predict that subject's M2
 # sustained/AUC exposure -- the intended Cmax-vs-AUC decoupling trap.
-M1_IIV_KF, M1_IIV_KE, M1_IIV_SCALE = 0.06, 0.06, 0.07
+M1_IIV_KF, M1_IIV_KE, M1_IIV_SCALE = 0.15, 0.12, 0.42
 M2_IIV_KF, M2_IIV_KE, M2_IIV_SCALE = 1.40, 0.20, 0.12
 PARENT_IIV_KF, PARENT_IIV_KE, PARENT_IIV_SCALE = 0.10, 0.08, 0.12
 PK_ASSAY_CV = 0.08      # proportional assay noise on sampled concentrations
@@ -78,7 +78,7 @@ PK_ASSAY_CV = 0.08      # proportional assay noise on sampled concentrations
 TAU = 12.0
 N_DOSES_MULTI = 7
 DOSE_LOW = 50.0
-DOSE_HIGH = 250.0
+DOSE_HIGH = 150.0
 N_SUBJECTS_PER_CELL = 8  # 4 cells (dose x regimen) x 8 = 32 subjects
 
 TIME_OFFSETS_SINGLE = [0.25, 0.5, 1, 2, 4, 6, 8, 12, 16, 24, 36, 48]
@@ -104,8 +104,8 @@ PD_NOISE_SD = 38.0
 # reasons, of exactly the kind that can inflate a naive correlation without
 # being an obvious inspection-visible outlier.
 INFLUENTIAL_M1_MULT = 3.0
-INFLUENTIAL_PD_BUMP_MEAN = 45.0
-INFLUENTIAL_PD_BUMP_SD = 8.0
+INFLUENTIAL_PD_BUMP_MEAN = 155.0
+INFLUENTIAL_PD_BUMP_SD = 10.0
 
 
 def bateman(t, kf, ke, scale):
@@ -242,11 +242,12 @@ def main():
         ("multi_high", DOSE_HIGH, N_DOSES_MULTI, TAU),
     ]
 
-    # 2 moderately-influential subjects (one per dose level), enough
-    # individual leverage to show up in single-point leave-one-out, but a
-    # 2.3x M1 bump (not a cartoonish 4x) plus a noisy (not fixed) PD bump --
-    # subtle enough not to be obvious by inspection.
-    influential_slots = {("single_low", 2), ("single_high", 5)}
+    # A single moderately-influential subject (not two -- two salted points
+    # defeats single-point leave-one-out, since removing either leaves the
+    # other in place). One subject with a real but not cartoonish M1/PD
+    # co-elevation is enough to make the naive correlation observation-
+    # sensitive without being visually obvious as an outlier.
+    influential_slots = {("single_low", 2)}
 
     pk_all, pd_all, subj_all, gt_all = [], [], [], []
     subj_counter = 0
