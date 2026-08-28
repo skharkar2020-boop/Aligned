@@ -61,7 +61,7 @@ PARENT_KF, PARENT_KE = 2.5, 0.60  # fast absorption-like rise, fast decline
 
 M1_SCALE_PER_DOSE = 0.85          # (ng/mL) per mg dose, population value
 M2_SCALE_PER_DOSE = 0.32
-PARENT_SCALE_PER_DOSE = 1.10
+PARENT_SCALE_PER_DOSE = 0.70
 
 # M1 is kept low-noise / tightly dose-predictable on purpose: a clean,
 # highly plausible decoy signal (Cmax/AUC both track dose cleanly, which is
