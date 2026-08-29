@@ -31,4 +31,19 @@ Save the final result to `/workspace/output/result.json` using this JSON schema:
 }
 ```
 
+Use one of the following values for `analysis_strategy`:
+
+* `pooled`
+* `cohort1_only`
+* `cohort2_only`
+* `fixed_effect_meta_analysis`
+* `per_cohort_independent_replication`
+
+Use one of the following values for `heterogeneity_assessment`:
+
+* `consistent_both_cohorts`
+* `stronger_in_cohort1_weaker_in_cohort2`
+* `stronger_in_cohort2_weaker_in_cohort1`
+* `opposite_direction_between_cohorts`
+
 All reported values should be derived from the supplied data and the final analysis. The `rejected_competing_gene` should represent the strongest alternative considered, and the `rationale` should briefly explain why the nominated gene was preferred.
