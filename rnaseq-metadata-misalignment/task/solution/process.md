@@ -102,11 +102,28 @@ what makes reconciling them a judgment call rather than a lookup.
 1. Run the same per-gene DE procedure (log2-CPM, Welch's t-test, BH-FDR)
    independently within `cohort1` and within `cohort2`. Never pool.
 2. For any gene near the top of either cohort's own ranking, require BOTH
-   that it show a *nominally* significant (raw p < 0.05 -- not
-   BH-adjusted; cohort2 is noisier, so a real effect is not expected to
-   survive multiple-testing correction there) effect independently in the
-   **other** cohort too, AND that the two cohorts' effects have the same
-   sign. Checking significance without checking sign is not sufficient:
+   that it show a *nominally* significant (raw p < 0.05, not
+   BH-re-adjusted within cohort2) effect independently in the **other**
+   cohort too, AND that the two cohorts' effects have the same sign.
+   Nominal, not re-adjusted, is the deliberate choice, not an arbitrary
+   one: this is a two-stage discovery-then-confirm design (cohort1 flags
+   candidates, cohort2 checks whether they hold up), and standard practice
+   in that design is to test the confirmatory cohort at a nominal
+   threshold for the specific candidate already flagged, not to re-run a
+   fresh whole-panel multiple-testing correction there. The candidate
+   already paid its multiple-testing "cost" once, at the discovery stage,
+   by having to be the best hit among 300 genes in cohort1; re-correcting
+   across all 300 genes again in cohort2 penalizes it a second time for
+   the same thing and makes a real, replicating effect look like it
+   failed. (This was not a hypothetical concern: a fresh trial run against
+   this exact dataset independently re-derived the whole analysis
+   correctly -- crash and misalignment fixed, per-cohort split, same-sign
+   replication check -- but applied BH-FDR within cohort2 as its
+   replication bar instead of the nominal threshold, which flips the
+   answer to CONSISTENCY_GENE: TRUE_GENE's cohort2 raw p=0.016 clears
+   0.05 easily, but its cohort2-only BH-adjusted p=0.33 does not. Verified
+   on the locked dataset, not asserted.) Checking significance without
+   checking sign is also not sufficient, for a separate reason:
    the technical-artifact gene's own cohort1 result now clears p<0.05 on
    its own, and only fails because it points the opposite direction from
    its cohort2 effect. A gene whose apparent effect is confined to one
