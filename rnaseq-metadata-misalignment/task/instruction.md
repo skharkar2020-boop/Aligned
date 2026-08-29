@@ -33,11 +33,11 @@ Save the final result to `/workspace/output/result.json` using this JSON schema:
 
 Use one of the following values for `analysis_strategy`:
 
-* `pooled`
-* `cohort1_only`
-* `cohort2_only`
-* `fixed_effect_meta_analysis`
-* `per_cohort_independent_replication`
+* `strategy_a`
+* `strategy_b`
+* `strategy_c`
+* `strategy_d`
+* `strategy_e`
 
 Use one of the following values for `heterogeneity_assessment`:
 

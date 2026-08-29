@@ -2,7 +2,7 @@
   "top_gene": "CACNA619",
   "log2_fold_change": 2.1326,
   "adjusted_p_value": 5.657397534945176e-05,
-  "analysis_strategy": "per_cohort_independent_replication",
+  "analysis_strategy": "strategy_e",
   "cohort1_log2_fold_change": 2.1326,
   "cohort2_log2_fold_change": 0.5033,
   "heterogeneity_assessment": "stronger_in_cohort1_weaker_in_cohort2",

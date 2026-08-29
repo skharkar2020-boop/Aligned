@@ -215,7 +215,7 @@ def main() -> None:
         "top_gene": str(top_gene),
         "log2_fold_change": round(float(home["log2_fold_change"]), 4),
         "adjusted_p_value": float(home["adjusted_p_value"]),
-        "analysis_strategy": "per_cohort_independent_replication",
+        "analysis_strategy": "strategy_e",  # neutral code for per-cohort independent replication
         "cohort1_log2_fold_change": round(c1_fc, 4),
         "cohort2_log2_fold_change": round(c2_fc, 4),
         "heterogeneity_assessment": heterogeneity_assessment,

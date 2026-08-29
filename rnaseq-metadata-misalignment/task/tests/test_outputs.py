@@ -46,16 +46,23 @@ EXPECTED_KEYS = {
 }
 TOTAL_SAMPLES = 24
 
-# analysis_strategy names the agent may legitimately report having used;
-# only one of them is actually correct here (see
+# analysis_strategy is a neutral code, not a method name -- the agent must
+# not be able to identify the correct strategy from its label. Only one of
+# these five is actually correct here (see
 # test_analysis_strategy_matches_recomputation), but any other value is a
-# schema violation, not just a wrong answer.
+# schema violation, not just a wrong answer. strategy_e is the code for
+# per-cohort independent replication (nominal same-signed significance
+# required independently in both cohorts); the others correspond, in the
+# same order the human-readable names previously used, to: naive pooled DE
+# (strategy_a), cohort1-only (strategy_b), cohort2-only (strategy_c), and a
+# fixed-effect/sign-blind combined-p meta-analysis (strategy_d). See
+# task/README.md for what each actually does on this dataset.
 VALID_ANALYSIS_STRATEGIES = {
-    "pooled",
-    "cohort1_only",
-    "cohort2_only",
-    "fixed_effect_meta_analysis",
-    "per_cohort_independent_replication",
+    "strategy_a",
+    "strategy_b",
+    "strategy_c",
+    "strategy_d",
+    "strategy_e",
 }
 VALID_HETEROGENEITY_LABELS = {
     "consistent_both_cohorts",
@@ -211,7 +218,7 @@ def _compute_reference() -> dict[str, object]:
         "top_gene": str(top_gene),
         "log2_fold_change": float(home["log2_fold_change"]),
         "adjusted_p_value": float(home["adjusted_p_value"]),
-        "analysis_strategy": "per_cohort_independent_replication",
+        "analysis_strategy": "strategy_e",
         "cohort1_log2_fold_change": c1_fc,
         "cohort2_log2_fold_change": c2_fc,
         "heterogeneity_assessment": _classify_heterogeneity(c1_fc, c2_fc),
