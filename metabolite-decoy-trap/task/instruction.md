@@ -8,12 +8,7 @@ M1, and M2 whose systemic exposure genuinely explains the observed
 pharmacodynamic (PD) response.
 
 Nominate the species (`parent`, `M1`, or `M2`) whose exposure-response
-relationship is best supported by the available evidence. A relationship
-that only appears in a naive, unadjusted correlation is not sufficient
-evidence on its own: report whether each candidate's relationship holds up
-after adjusting for dose and dosing regimen, whether it holds under repeated
-dosing, and whether it reflects a pharmacologically appropriate (sustained)
-exposure window rather than an instantaneous peak.
+relationship is best supported by the available evidence.
 
 ## Data
 
