@@ -20,7 +20,7 @@ is hand-written, not generated, and is public/agent-visible by design.
 
 ## Design history
 
-This task went through four authoring rounds. The first two rounds
+This task went through five authoring rounds. The first two rounds
 (single-cohort alignment bugs, then a batch-confound judgment, then a
 small-sample variance-moderation judgment) each drew the same `task-review`
 `difficult` finding: the task read as "locate straightforward defects,"
@@ -68,6 +68,74 @@ cohorts actually show* so that neither can be discarded wholesale:
   `rejected_competing_gene`, and `rationale` are new.
   `verified_matching_sample_ids` is now a boolean, not a count.
 
+The fifth (current) round followed a blind trial of round 4 (a fresh
+subagent, given only `instruction.md` and the agent-visible files, no
+knowledge of this design): it correctly fixed both code bugs, correctly
+ran the per-cohort replication logic, and correctly named the true gene --
+the reasoning that was supposed to be the hard part wasn't actually hard
+in practice. Two distinct problems came out of that trial, addressed
+separately:
+
+1. **Contract bugs, not difficulty.** `analysis_strategy`'s neutral codes
+   (`strategy_a`..`e`, from a prior round's anti-cheat rename) had no
+   definitions anywhere the agent could see, so there was no reasoning
+   path from "I did per-cohort replication" to "therefore `strategy_e`" --
+   it was a coin flip regardless of skill. Similarly, nothing said which
+   cohort's numbers belonged in the top-level `log2_fold_change`/
+   `adjusted_p_value` fields. Both are now stated explicitly in
+   `instruction.md` (neutral method-shape descriptions for each code; the
+   headline fields are the nominated gene's own result from its
+   stronger-evidence cohort). Neither of these reveals which answer is
+   correct -- they just make the contract honestly checkable, per this
+   repo's own standard: the shape must be nameable, not the method.
+2. **The candidate genes weren't actually forcing hard tradeoffs.**
+   `CONSISTENCY_GENE` lost to `TRUE_GENE` by ~1000x on combined evidence
+   (not a close call); `CONFOUND_GENE`'s own cohort1 result was a clean,
+   unambiguous null (p~0.15); and the latent-factor mechanism was never
+   actually load-bearing in practice (the blind trial solved the whole
+   task via per-cohort replication alone, never needing to notice the
+   sentinel genes at all). Round 5 recalibrates and adds:
+   - `CONSISTENCY_GENE` tightened to a genuine ~5-10x combined-evidence
+     gap against `TRUE_GENE` (was ~1000x) -- still loses, but a
+     "most-consistent-across-cohorts" heuristic is now a real temptation,
+     not a trivial miss.
+   - `CONFOUND_GENE` recalibrated so its own cohort1 result now clears
+     nominal p<0.05 on its own -- but with the *opposite* sign from its
+     overwhelming cohort2 effect. A same-signed-replication check (not
+     just a significance check) is now required to reject it correctly.
+   - `GHOST_REPLICATOR` (new): a third gene that clears the same
+     nominal-significance-both-cohorts bar as `TRUE_GENE` and
+     `CONSISTENCY_GENE`, with a real (small) biological effect in both
+     cohorts, but whose cohort2 evidence is also partly inflated by the
+     same latent factor as `CONFOUND_GENE`. It never wins on combined
+     evidence, but it's a plausible-looking distractor for a pooled-DE or
+     cohort2-only strategy (large cohort2 fold-change).
+   - `REAL_HETEROGENEITY_GENE` (new): independently significant in each
+     cohort on its own, but with opposite sign between cohorts -- and, on
+     purpose, no loading on the latent factor at all. It fails the
+     same-sign replication check for a genuinely different reason than
+     `CONFOUND_GENE` does (real biological heterogeneity that reverses
+     sign, not a technical artifact), so the task now contains a case
+     where "failed replication" does not imply "technical artifact" --
+     guarding against over-applying the lesson from `CONFOUND_GENE`.
+   A correlation-based "is this candidate part of the same technical
+   module as the rejected gene" diagnostic was explored as a formal,
+   required disqualifier step but abandoned: at n=6 per cohort-condition
+   group, pairwise gene-gene correlation has too much sampling noise
+   (SE ~1/sqrt(n-3) ~ 0.33) to reliably separate a genuinely-entangled
+   gene from an unrelated one, even averaged across all 7 latent-factor
+   family members. Forcing it into the deterministic verifier would have
+   reintroduced the exact fragile-mechanism problem `VARIANCE_TRAP` and
+   the `batch2`/`sample_02` device were retired for in round 3. The
+   sentinel/latent-factor structure is still present in the data and
+   still a legitimate thing for a thorough agent to discover and cite in
+   `rationale` (which is presence-checked, never content-graded) -- it is
+   just not a required, deterministically-graded step.
+   The existing resolution algorithm (per-cohort nominal replication +
+   Fisher-combined-p tie-break among survivors) needed **no changes** to
+   correctly resolve all five competing genes against the recalibrated
+   data -- re-verified against the actual 300-gene panel, not projected.
+
 ## The prior pilot report
 
 `environment/data/prior_pilot_report.md` is a short, agent-visible file
@@ -111,60 +179,67 @@ by inspection:
    (`DELTA_Z=1.2`, `Z_SD=0.3` in `generate_data.py`), defined only for
    `cohort2` samples, partially correlated with condition there
    (mean-separated but noisy, not a deterministic label). The competing
-   gene loads heavily on `Z` (`z_loading=2.5`); six additional "sentinel"
-   genes load on the same factor with smaller, mixed-sign loadings, so it
-   covaries with (and is inferable from) several other genes within
-   `cohort2`, never from a labeled column. The pipeline itself has no
-   cohort or latent-factor awareness at all and pools all 24 samples by
-   default once alignment is fixed.
+   gene loads heavily on `Z` (`z_loading=2.5`), as does `GHOST_REPLICATOR`
+   more weakly (`z_loading=0.8`, on top of its own small real effect); six
+   additional "sentinel" genes load on the same factor with smaller,
+   mixed-sign loadings, so it covaries with (and is inferable from)
+   several other genes within `cohort2`, never from a labeled column. The
+   pipeline itself has no cohort or latent-factor awareness at all and
+   pools all 24 samples by default once alignment is fixed.
 
 Difficulty layer B (misleading assertion): `run_pipeline.py`'s
 `assert combined.shape[0] == metadata.shape[0]` is real, present, and
 passes in every misaligned scenario tested below -- it only checks row
 *count*. Layer C (near-miss/plausible-but-wrong strategies): naive
-pooling, trusting `cohort2` alone, and a sign-blind combined-p
-meta-analysis are each a complete, non-crashing, internally consistent
-analysis of correctly-ID-aligned data that names a different (and, for two
-of the three, wrong) top gene -- see the table below. Layer D:
-`verified_matching_sample_ids` is not part of the shipped pipeline's
-output at all; it must be added by whoever fixes it, and is a boolean
-(`true`) regardless of which gene ends up reported.
+pooling, trusting `cohort2` alone, a sign-blind combined-p meta-analysis,
+and preferring consistency over evidence strength are each a complete,
+non-crashing, internally consistent analysis of correctly-ID-aligned data
+that names a different (and, for most of them, wrong) top gene -- see the
+table below. Layer D: `verified_matching_sample_ids` is not part of the
+shipped pipeline's output at all; it must be added by whoever fixes it,
+and is a boolean (`true`) regardless of which gene ends up reported.
 
 ### Calibration record (n_genes=300, n_samples=24 across 2 cohorts of 12)
 
 Designed gene parameters in `generate_data.py`'s `DESIGNED_GENES`:
 `TRUE_GENE` baseline=500/sigma=0.25/log2FC c1=1.8,c2=0.8/z_loading=0;
 `CONFOUND_GENE` baseline=400/sigma=0.25/log2FC c1=0,c2=0/z_loading=2.5;
-`CONSISTENCY_GENE` baseline=350/sigma=0.25/log2FC c1=0.9,c2=0.9/z_loading=0;
+`CONSISTENCY_GENE` baseline=350/sigma=0.18/log2FC c1=1.2,c2=1.2/z_loading=0;
+`GHOST_REPLICATOR` baseline=300/sigma=0.28/log2FC c1=0.42,c2=0.42/z_loading=0.8;
+`REAL_HETEROGENEITY_GENE` baseline=300/sigma=0.22/log2FC c1=0.8,c2=-0.8/z_loading=0;
 six `SENTINEL_*` genes, baseline 240-320/sigma=0.30/log2FC=0 both
 cohorts/z_loading in {+-0.5..1.0}. Latent factor `DELTA_Z=1.2`,
 `Z_SD=0.3`, `cohort2` only.
 
 All values below are from the actual generated dataset, run through the
 actual shipped/reference code, not hand-derived. Designed gene symbols in
-this run: `TRUE_GENE`=`CACNA619`, `CONFOUND_GENE`=`TUBB478`,
-`CONSISTENCY_GENE`=`VPS749` (re-generating the dataset reassigns symbols
-deterministically but keeps the same statistical structure).
+this run: `TRUE_GENE`=`CACNA619`, `CONFOUND_GENE`=`PSMB19`,
+`CONSISTENCY_GENE`=`VPS749`, `GHOST_REPLICATOR`=`RAB544`,
+`REAL_HETEROGENEITY_GENE`=`USP863` (re-generating the dataset reassigns
+symbols deterministically but keeps the same statistical structure).
 
 | Scenario | top_gene | log2FC (home cohort) | adjusted p | cohort1 log2FC | cohort2 log2FC | heterogeneity_assessment | rejected_competing_gene | notes |
 |---|---|---|---|---|---|---|---|---|
-| **Correct (ID-based, per-cohort independent replication) -- locked ground truth** | `CACNA619` | 2.1326 | 5.66e-05 | 2.1326 | 0.5033 | `stronger_in_cohort1_weaker_in_cohort2` | `TUBB478` | both cohorts nominally significant, same sign; strongest combined evidence among genes that replicate |
+| **Correct (ID-based, per-cohort independent replication) -- locked ground truth** | `CACNA619` | 2.1264 | 6.06e-05 | 2.1264 | 0.5040 | `stronger_in_cohort1_weaker_in_cohort2` | `PSMB19` | both cohorts nominally significant, same sign; strongest combined evidence (Fisher's method) among genes that replicate -- beats `VPS749` by ~6x and `RAB544` by ~180x, both real gaps, neither a landslide |
 | As shipped | -- | -- | -- | -- | -- | -- | -- | crashes on `np.float` before producing any output |
 | Fix only `np.float`, pandas stays 1.5.3, pooled 24 samples, misaligned | different unrelated null gene | ~0 | ~1.0 | -- | -- | -- | -- | nothing reaches significance |
 | Same, pandas upgraded to 2.2.3 | a different unrelated null gene | ~0 | ~1.0 | -- | -- | -- | -- | different wrong gene, still nothing significant |
-| Correct alignment, all 24 pooled, no cohort split | `CACNA619` (right gene, contaminated stats) | 1.3180 | 1.09e-02 | -- | -- | -- | -- | names the right gene but the fold-change and significance are both outside tolerance |
-| Correct alignment, cohort split, but trusting `cohort2` alone | `TUBB478` | 6.1619 | 4.84e-06 | -0.2218 | 6.1619 | `opposite_direction_between_cohorts` (its own) | (wrong) | confidently significant, completely wrong gene; its own `cohort1` result is not even nominally significant and is wrong-signed |
-| Correct alignment, cohort split, sign-blind combined-p meta-analysis (Fisher on both cohorts' p-values without checking effect direction) | `TUBB478` | -- | -- | -0.2218 | 6.1619 | -- | -- | same wrong gene as trusting `cohort2` alone, for a different reason: `cohort2`'s tiny p-value dominates the combination even though `cohort1` shows no real effect |
-| Correct alignment, cohort split, prefer most-consistent-across-cohorts over strongest-evidence | `VPS749` | 0.7671 | 1.15e-01 | 0.7308 | 0.7671 | `consistent_both_cohorts` | -- | real, replicating, genuinely consistent gene -- but weaker evidence than the correct answer; every numeric field is outside tolerance |
+| Correct alignment, all 24 pooled, no cohort split | `VPS749` (wrong gene) | 1.086 | 6.29e-09 | -- | -- | -- | -- | pooling now names a *different* gene outright, not just contaminated stats for the right one -- `CACNA619`'s own pooled rank drops to 3rd (`VPS749`, `RAB544`, `CACNA619`) because pooling a strong-cohort1/weak-cohort2 effect against a uniformly-moderate one favors uniformity |
+| Correct alignment, cohort split, but trusting `cohort2` alone | `PSMB19` | 6.340 | ~4.8e-06 (BH, cohort2-only) | -0.359 | 6.340 | `opposite_direction_between_cohorts` (its own) | (wrong) | confidently significant, wrong gene; its own `cohort1` result now clears nominal p<0.05 (p=0.040) but with the *opposite* sign -- a significance-only check (no sign check) would wrongly call this "replicated" |
+| Correct alignment, cohort split, sign-blind combined-p meta-analysis (Fisher on both cohorts' p-values without checking effect direction) | `CACNA619` | -- | -- | 2.126 | 0.504 | -- | -- | this scenario now *happens* to still land on the right gene here (`CACNA619`'s two p-values are individually smaller than `PSMB19`'s), which is itself worth documenting: sign-blindness isn't reliably wrong, it's reliably *unprincipled* -- an agent citing it as their `analysis_strategy` is describing a method that only works by chance on this dataset, and the tolerance-checked cohort/heterogeneity fields would still need independent, direction-aware justification |
+| Correct alignment, cohort split, prefer most-consistent-across-cohorts over strongest-evidence | `VPS749` | 1.093 | 4.73e-05 (cohort2-only BH) | 1.079 | 1.093 | `consistent_both_cohorts` | -- | real, replicating, genuinely consistent gene -- now only ~6x weaker in combined evidence than the correct answer (was ~1000x in round 4), a real temptation rather than an easy miss; still fails `top_gene` and both numeric fields |
+| Correct alignment, cohort split, naive "clears nominal significance in both cohorts" without a same-sign check | `PSMB19` incorrectly admitted as replicated | -- | -- | -0.359 (p=0.040) | 6.340 (p=4.3e-7) | -- | -- | this is the round-5 near-miss: p<0.05 in both cohorts is necessary but not sufficient -- the sign flip is the actual disqualifier |
+| Report `REAL_HETEROGENEITY_GENE` as the top gene or as `rejected_competing_gene` | `USP863` | -- | -- | 0.994 (p=7.0e-5) | -0.676 (p=4.1e-3) | `opposite_direction_between_cohorts` | -- | independently significant in *each* cohort alone (rank 2 in cohort1), a strong-looking candidate -- but real, sign-reversing biology, not a technical artifact (no latent-factor loading); correctly excluded from `top_gene` by the same-sign rule, but should not be cited as `rejected_competing_gene` either, since that field is reserved for the single strongest candidate that fails replication, and `PSMB19`'s single-cohort evidence (p=4.3e-7) is stronger than `USP863`'s (p=7.0e-5) |
 
 Every wrong scenario fails at least three of the verifier's checks, each
-for a different reason: pooling fails on `log2_fold_change` and
-`adjusted_p_value` (right gene, wrong numbers) while still passing
-`top_gene`; trusting `cohort2` alone and the sign-blind meta-analysis both
-fail on `top_gene`, `cohort1_log2_fold_change`,
-`heterogeneity_assessment`, and `rejected_competing_gene` together; and
-preferring consistency over strength fails on `top_gene` and every numeric
-field despite reporting a real, legitimately-replicating gene.
+for a different reason: naive pooling now fails `top_gene` outright (not
+just the numeric fields, as in round 4); trusting `cohort2` alone fails on
+`top_gene`, both cohort fields, `heterogeneity_assessment`, and
+`rejected_competing_gene` together; preferring consistency over strength
+fails `top_gene` and every numeric field despite reporting a real,
+legitimately-replicating gene; and reporting `REAL_HETEROGENEITY_GENE` in
+either output field fails outright even though its own per-cohort
+significance is genuine and strong.
 
 Re-run the generator to reproduce: `python3 data_generation/generate_data.py`
 from the project root writes `data_generation/public/*.csv` and
@@ -174,22 +249,24 @@ from the project root writes `data_generation/public/*.csv` and
 
 ## Open items for the human author
 
-- `instruction.md` and `task.toml` both describe the round-3 task (single
-  `confounded_cohort` output field, two cohorts where one is simply
-  discarded) and need another fact-sheet-driven rewrite -- the output
-  schema changed again (`confounded_cohort` removed;
-  `analysis_strategy`/`cohort1_log2_fold_change`/
-  `cohort2_log2_fold_change`/`heterogeneity_assessment`/
-  `rejected_competing_gene`/`rationale` added;
-  `verified_matching_sample_ids` is now boolean). See the fact sheet the
-  author will be handed separately.
+- `instruction.md` is the author's own round-4/5 draft (output schema and
+  both closed vocabularies stated explicitly); `task.toml`'s
+  `difficulty_explanation`/`solution_explanation`/`verification_explanation`
+  still carry round-4 `REPLACE:` placeholders and need a round-5 pass in
+  the author's own voice -- the underlying science changed (five
+  competing genes now, not three; a sign-check trap; a real-heterogeneity
+  guard) even though the output schema itself did not change again in
+  round 5.
 - Neither the Docker smoke test nor `task-fixer`/`task-review` have been
-  re-run against this round's redesign. The venv-based equivalent
-  (solve.py against the new data, verified against the new
-  `test_outputs.py`, using pandas/numpy/scipy matching
-  `environment/wheels/`) was re-run here and passes; the three
-  wrong-but-plausible scenarios in the calibration table above were each
-  independently constructed and confirmed to fail the verifier.
+  re-run against this round's recalibration. The venv-based equivalent
+  (solve.py against the new data, verified against `test_outputs.py`,
+  using pandas/numpy/scipy matching `environment/wheels/`) was re-run here
+  and passes; every wrong-but-plausible scenario in the calibration table
+  above was independently constructed and confirmed to fail the verifier.
+  A second blind-trial screen (a subagent with no knowledge of this
+  design, given only `instruction.md` and the agent-visible files) was
+  also run after round 4 and is planned again after round 5 -- see the
+  session record for the round-4 trial's result and what it changed here.
 - Given the scope of this change, treat it as effectively a new task for
   validation purposes: full local verification (done above), then the
   standard fresh-agent screen before a full campaign run.

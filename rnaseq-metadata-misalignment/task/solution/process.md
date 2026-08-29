@@ -49,65 +49,109 @@ confirmatory run). The pipeline pools all 24 samples into one comparison
 by default, with no cohort awareness at all -- and several plausible ways
 of handling the two cohorts each name a different top gene:
 
-- **Naive pooled DE** (all 24 samples, cohort-blind): still names the
-  correct gene here, but its fold-change and p-value are contaminated by
-  mixing a strong, low-noise cohort1 effect with a much weaker cohort2
-  effect for the same gene. The number does not match either cohort's own
-  honest estimate and falls outside the verifier's tolerance.
+- **Naive pooled DE** (all 24 samples, cohort-blind): names a *different*
+  gene outright here, not merely a contaminated estimate of the right one
+  -- pooling a strong-cohort1/weak-cohort2 effect against a gene with a
+  smaller but uniform effect in both cohorts favors the uniform one, once
+  the two are close enough in overall strength.
 - **Trusting cohort2 alone** (defensible on its face -- it's the later,
   "confirmatory" run, and its own top hit is dramatically significant):
-  names a *different* gene, one with a huge effect confined entirely to
-  cohort2 and no support at all in cohort1.
+  names a *different* gene, one with a huge effect confined almost
+  entirely to cohort2. Its own cohort1 result now clears nominal
+  significance on its own (p<0.05) -- but with the opposite sign, so
+  checking significance alone, without checking direction, would wrongly
+  call it replicated.
 - **A sign-blind combined-p meta-analysis** (a real, common mistake:
   plugging each candidate gene's two independent cohort-level p-values
   into Fisher's method without first checking that the two cohorts agree
-  on effect *direction*): lands on the same wrong gene as trusting cohort2
-  alone. That gene's extremely small cohort2 p-value dominates the
-  combination even though cohort1 shows essentially no effect (and a
-  slightly opposite sign) -- the combination never checked whether the two
-  cohorts were actually telling the same story.
+  on effect *direction*): on this dataset it happens to still land on the
+  correct gene, but only because that gene's two p-values both happen to
+  be individually smaller -- the method itself never checked whether the
+  two cohorts were telling the same story, so citing it as the
+  `analysis_strategy` describes an unprincipled method that got lucky
+  here, not a defensible one.
 - **Preferring whichever gene replicates most *consistently*** across
   cohorts, without also weighing how *strong* that evidence is: promotes a
   real, moderate, highly-consistent effect over a gene with a stronger
   overall case (a much stronger cohort1 effect that is real, but weaker
-  and closer to noise, in cohort2). Consistency alone is not sufficient
-  when it comes at the cost of materially weaker evidence.
+  and closer to noise, in cohort2). The consistent gene's combined
+  evidence is now only about 6x weaker than the correct answer's (not
+  1000x) -- a real, close call, not an easy miss. Consistency alone is not
+  sufficient when it comes at the cost of materially weaker evidence.
+- **Checking nominal significance in both cohorts without checking sign
+  agreement**: admits the confounded gene as "replicated" on the strength
+  of its now-nominally-significant cohort1 p-value alone, missing that the
+  sign is reversed from its overwhelming cohort2 effect.
+- **Flagging any gene with a dramatic, cohort-specific difference as a
+  technical artifact by default**: a second gene exists that is
+  independently significant in *each* cohort alone but with opposite
+  signs, and carries no loading on the latent technical factor at all --
+  it is real, sign-reversing biology, not a processing artifact. Rejecting
+  it from `top_gene` is correct (it fails the same-sign replication
+  requirement, same as the technical artifact does), but citing it as
+  `rejected_competing_gene` is not: that field is reserved for the
+  strongest candidate that fails replication, and the technical artifact's
+  own single-cohort evidence is stronger.
 
-None of these four are coding errors -- each is a real, internally
-consistent, non-crashing statistical analysis of correctly-ID-aligned
-data. That is what makes reconciling them a judgment call rather than a
-lookup.
+None of these are coding errors -- each is a real, internally consistent,
+non-crashing statistical analysis of correctly-ID-aligned data. That is
+what makes reconciling them a judgment call rather than a lookup.
 
 ## The correct resolution
 
 1. Run the same per-gene DE procedure (log2-CPM, Welch's t-test, BH-FDR)
    independently within `cohort1` and within `cohort2`. Never pool.
-2. For any gene near the top of either cohort's own ranking, require that
-   it also show a *nominally* significant (raw p < 0.05 -- not
+2. For any gene near the top of either cohort's own ranking, require BOTH
+   that it show a *nominally* significant (raw p < 0.05 -- not
    BH-adjusted; cohort2 is noisier, so a real effect is not expected to
-   survive multiple-testing correction there), *same-signed* effect
-   independently in the **other** cohort too. A gene whose apparent effect
-   is confined to one cohort and shows nothing (not even a weak,
-   same-direction nominal signal) in the other has failed to replicate --
+   survive multiple-testing correction there) effect independently in the
+   **other** cohort too, AND that the two cohorts' effects have the same
+   sign. Checking significance without checking sign is not sufficient:
+   the technical-artifact gene's own cohort1 result now clears p<0.05 on
+   its own, and only fails because it points the opposite direction from
+   its cohort2 effect. A gene whose apparent effect is confined to one
+   cohort and shows nothing (not even a weak, same-direction nominal
+   signal) in the other has failed to replicate for a different reason --
    that asymmetry, not a bigger number, is the signature of a
-   cohort-specific technical artifact rather than biology. The rejected
-   gene here loads heavily on a latent factor that only carries a real
+   cohort-specific technical artifact rather than biology. The technical
+   artifact here loads heavily on a latent factor that only carries a real
    signal within `cohort2`; nothing in the public data names that factor
-   directly, but genes that cluster together on it (moving together
-   within `cohort2`, flat in `cohort1`) are visible in the expression data
-   itself for anyone who looks for that structure (e.g. correlating
-   candidate genes against each other within a cohort, or a quick PCA).
-3. More than one gene can pass that replication bar -- real biological
+   directly, but genes that cluster together on it (moving together within
+   `cohort2`, flat in `cohort1`) are visible in the expression data itself
+   for anyone who looks for that structure (e.g. correlating candidate
+   genes against each other within a cohort, or a quick PCA) -- this is
+   useful corroborating evidence for the rationale, but the deterministic
+   verifier does not require it: a small correlation-based "same technical
+   module" check was tried during authoring and dropped, because at n=6
+   per cohort-condition group it is too noisy to reliably separate a
+   genuinely-entangled gene from an unrelated one, even averaged across
+   every gene that loads on the factor.
+   NOT every gene with a large, cohort-specific, sign-reversing effect is a
+   technical artifact, either -- one candidate in this dataset is
+   independently significant in each cohort alone, with opposite signs,
+   but carries no loading on the latent factor at all: real biological
+   heterogeneity that happens to flip sign between an original and a
+   confirmatory cohort. It still fails the same-sign replication
+   requirement (same as the artifact does), but it is not itself evidence
+   of a processing problem, and should not be cited as the rejected
+   competing gene when a stronger, genuinely-technical candidate exists.
+3. More than one gene can pass the replication bar -- real biological
    effects are not required to be identical in magnitude across cohorts,
    and moderate heterogeneity (stronger in one cohort, weaker but real in
-   the other, same direction) is expected, not disqualifying. When more
-   than one candidate clears the bar, prefer the one with the stronger
+   the other, same direction) is expected, not disqualifying. Up to three
+   candidates can clear it at once: the true gene, a smaller-but-consistent
+   gene, and a gene whose apparent significance is partly inflated by
+   the same latent factor as the technical artifact (its own cohort1
+   effect is real and modest; its cohort2 effect looks more impressive
+   than that alone would justify). Prefer the one with the strongest
    *combined* evidence (e.g. Fisher's method on the two nominal p-values,
    now legitimately applicable because direction agreement has already
    been confirmed) over the one that is merely the most uniform across
-   cohorts. A smaller, very consistent effect is not automatically the
-   safer answer if a materially stronger, still-replicating effect is
-   available.
+   cohorts, or the one with the single most dramatic cohort2 number. A
+   smaller, very consistent effect is not automatically the safer answer
+   if a materially stronger, still-replicating effect is available; nor is
+   a gene automatically trustworthy just because it technically cleared
+   the same-cohort bar.
 4. Report the surviving gene's own result from whichever cohort gives it
    the stronger (smaller p-value) evidence, alongside both cohorts'
    individual fold-changes and a categorical description of how they
@@ -178,17 +222,27 @@ internal check that the verifier would actually catch them, none of which
 crash or produce a NaN -- see task/README.md's calibration table for the
 actual numbers:
 
-- Naive pooled DE names the correct gene but a contaminated fold-change
-  and adjusted p-value, both outside tolerance.
+- Naive pooled DE names a different gene outright (not merely a
+  contaminated estimate of the right one).
 - Trusting `cohort2` alone names a different gene entirely, with
   everything about it (fold-changes, heterogeneity label, rejected gene)
-  wrong.
-- A sign-blind combined-p meta-analysis lands on the same wrong gene as
-  trusting `cohort2` alone, for a different (but equally plausible)
-  reason.
+  wrong; its own cohort1 result is now nominally significant but
+  wrong-signed.
+- A sign-blind combined-p meta-analysis happens to still land on the
+  correct gene here, but for reasons unrelated to sound method -- citing
+  it as the strategy used is itself a defensible-sounding but incorrect
+  description of how the answer was actually reached.
 - Preferring the most cross-cohort-consistent gene over the one with
   materially stronger evidence names a real, replicating, but
-  weaker-evidence gene -- wrong on every numeric field.
+  weaker-evidence gene -- wrong on every numeric field, though the margin
+  is now close enough (~6x, not ~1000x) to be a genuine judgment call.
+- Admitting a candidate as "replicated" on significance alone, without
+  checking that both cohorts agree on effect direction, wrongly accepts
+  the technical artifact.
+- Citing the real-but-sign-reversing heterogeneous gene as the rejected
+  competitor (rather than the genuine technical artifact) is wrong even
+  though excluding it from `top_gene` is correct -- its own single-cohort
+  evidence is real but weaker than the actual technical artifact's.
 
 All are visibly different from the locked reference values on at least one
 checked field, and each fails for a different underlying reason.

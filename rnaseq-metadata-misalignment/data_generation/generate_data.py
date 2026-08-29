@@ -20,11 +20,38 @@ Ground truth (never exposed via file/column names in the public data):
     shows nothing. This makes CONFOUND_GENE the single strongest hit in a
     naive pooled or cohort2-only analysis, well above TRUE_GENE.
   - CONSISTENCY_GENE has a real biological effect, same direction and
-    similar magnitude in both cohorts -- but a smaller magnitude and weaker
-    overall evidence than TRUE_GENE. It exists to force a genuine tradeoff:
-    a naive "prefer whatever replicates most consistently" rule promotes
-    CONSISTENCY_GENE over TRUE_GENE, when TRUE_GENE's evidence is actually
-    stronger once real, moderate heterogeneity is properly tolerated.
+    similar magnitude in both cohorts -- but weaker overall combined
+    evidence than TRUE_GENE (roughly 5-10x weaker by Fisher's method, not
+    orders of magnitude), calibrated as a genuine close call rather than a
+    landslide: a naive "prefer whatever replicates most consistently" rule
+    promotes CONSISTENCY_GENE over TRUE_GENE, when TRUE_GENE's evidence is
+    actually stronger once real, moderate heterogeneity is properly
+    tolerated, but the margin is real, not trivial.
+  - GHOST_REPLICATOR is a third gene that clears the same nominal-
+    significance-in-both-cohorts bar as TRUE_GENE and CONSISTENCY_GENE
+    (small real biological effect, same direction both cohorts) but whose
+    cohort2 evidence also loads partially on the latent factor Z, so it
+    looks more impressive (particularly in cohort2 alone, or in a naive
+    pooled/fold-change-only comparison) than its actual combined evidence
+    supports. It never wins the Fisher-combined-p comparison against
+    TRUE_GENE or CONSISTENCY_GENE, but expands the replicated-candidate
+    set from two genes to three, and its large cohort2 fold-change is a
+    plausible-looking distractor for a pooled-DE or cohort2-only strategy.
+  - CONFOUND_GENE's own cohort1 result is calibrated to be a near-miss, not
+    a clean null: it clears nominal p<0.05 in cohort1 on its own, but with
+    the OPPOSITE sign from its overwhelming cohort2 effect -- a naive
+    replication check that tests significance without also checking effect
+    direction would incorrectly treat it as replicated.
+  - REAL_HETEROGENEITY_GENE has a real, independently significant effect in
+    each cohort individually, but the two cohorts' effects have opposite
+    sign (not a technical artifact -- it carries no loading on the latent
+    factor Z at all, unlike CONFOUND_GENE and the sentinels). It fails the
+    same-sign replication requirement for the same procedural reason
+    CONFOUND_GENE does, but for a genuinely different, non-technical
+    reason: real cross-cohort biological heterogeneity can also produce a
+    sign flip, not just a technical artifact, so failing replication is not
+    itself proof that a candidate's cohort-level significance is a
+    processing artifact.
   - SENTINEL_1..SENTINEL_6 carry no true biological effect and no
     intentional labeling anywhere in public data. Each loads (with varying
     sign and magnitude) on the same latent factor Z as CONFOUND_GENE, so
@@ -165,7 +192,9 @@ def latent_z_by_sample(metadata: pd.DataFrame) -> dict[str, float]:
 DESIGNED_GENES = {
     "TRUE_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.8, "log2fc_c2": 0.8, "z_loading": 0.0},
     "CONFOUND_GENE": {"baseline": 400.0, "sigma": 0.25, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 2.5},
-    "CONSISTENCY_GENE": {"baseline": 350.0, "sigma": 0.25, "log2fc_c1": 0.9, "log2fc_c2": 0.9, "z_loading": 0.0},
+    "CONSISTENCY_GENE": {"baseline": 350.0, "sigma": 0.18, "log2fc_c1": 1.2, "log2fc_c2": 1.2, "z_loading": 0.0},
+    "GHOST_REPLICATOR": {"baseline": 300.0, "sigma": 0.28, "log2fc_c1": 0.42, "log2fc_c2": 0.42, "z_loading": 0.8},
+    "REAL_HETEROGENEITY_GENE": {"baseline": 300.0, "sigma": 0.22, "log2fc_c1": 0.8, "log2fc_c2": -0.8, "z_loading": 0.0},
     "SENTINEL_1": {"baseline": 280.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 0.8},
     "SENTINEL_2": {"baseline": 260.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": -0.6},
     "SENTINEL_3": {"baseline": 300.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 1.0},
@@ -176,8 +205,10 @@ DESIGNED_GENES = {
 # Fixed, non-obvious positions in the 300-gene panel.
 DESIGNED_POSITIONS = {
     "TRUE_GENE": 137,
-    "CONFOUND_GENE": 88,
+    "CONFOUND_GENE": 153,
     "CONSISTENCY_GENE": 203,
+    "GHOST_REPLICATOR": 33,
+    "REAL_HETEROGENEITY_GENE": 260,
     "SENTINEL_1": 15,
     "SENTINEL_2": 249,
     "SENTINEL_3": 61,

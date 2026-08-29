@@ -31,13 +31,15 @@ Save the final result to `/workspace/output/result.json` using this JSON schema:
 }
 ```
 
-Use one of the following values for `analysis_strategy`:
+Use one of the following values for `analysis_strategy`, choosing whichever one actually describes the approach used to reach the final answer:
 
-* `strategy_a`
-* `strategy_b`
-* `strategy_c`
-* `strategy_d`
-* `strategy_e`
+* `strategy_a` — pool all samples from both cohorts into a single combined analysis, without separating by cohort.
+* `strategy_b` — use only cohort1's samples.
+* `strategy_c` — use only cohort2's samples.
+* `strategy_d` — analyze each cohort separately, then combine the two cohorts' effect-size estimates into one using a formal meta-analysis procedure.
+* `strategy_e` — analyze each cohort separately, and treat a candidate gene as trustworthy only if it independently shows a significant effect in each cohort on its own, rather than mathematically combining the two cohorts' results into a single number.
+
+`log2_fold_change` and `adjusted_p_value` should be the nominated gene's own statistics from whichever single cohort gives it the stronger statistical support — not a pooled or averaged figure. `cohort1_log2_fold_change` and `cohort2_log2_fold_change` are where each cohort's own individual estimate belongs.
 
 Use one of the following values for `heterogeneity_assessment`:
 

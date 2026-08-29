@@ -14,23 +14,32 @@ author_email = "skharkar2020@gmail.com"
 author_organization = "Aligned"
 category = "data-ml-infrastructure"
 tags = ["rna-seq", "differential-expression", "data-pipeline-debugging", "sample-metadata-alignment", "pandas", "silent-data-corruption"]
-expert_time_estimate_hours = 14.0 # REPLACE: reconsider again -- round 4 adds a latent-factor diagnosis and an evidence-strength-vs-consistency tradeoff on top of round 3's cross-cohort reconciliation.
+expert_time_estimate_hours = 16.0 # REPLACE: reconsider again -- round 5 adds a sign-check trap, a second technically-boosted competitor, and a real-heterogeneity guard on top of round 4's evidence-strength-vs-consistency tradeoff, and tightens that tradeoff to a genuine close call.
 
-# REPLACE all three: the task structure changed again (confounded_cohort
-# field removed; analysis_strategy/cohort1_log2_fold_change/
+# REPLACE all three: the underlying science changed again even though the
+# output schema did not (still analysis_strategy/cohort1_log2_fold_change/
 # cohort2_log2_fold_change/heterogeneity_assessment/
-# rejected_competing_gene/rationale added). Neither cohort can be
-# discarded wholesale anymore -- both carry real evidence for the true
-# gene, and the competing gene's technical signature is latent, not an
-# explicit column. The previous explanations described round 3 (one
-# cohort obviously confounded, the other obviously clean) and are no
-# longer accurate. Write these in your own voice from
+# rejected_competing_gene/rationale/verified_matching_sample_ids). Round 5:
+# the consistency-vs-strength tradeoff is now a genuine ~6x call, not a
+# ~1000x landslide; the technical-artifact gene's own cohort1 result now
+# clears nominal significance but with the wrong sign, so a same-sign
+# check (not just a significance check) is required; a second
+# latent-factor-boosted gene (GHOST_REPLICATOR internally) clears the
+# naive replication gate but loses on combined evidence; and a gene with
+# real, sign-reversing biological heterogeneity (no latent-factor loading
+# at all) guards against over-applying "different between cohorts means
+# technical." A blind trial of round 4 (see task/README.md's design
+# history) got the crash/misalignment fixes and the per-cohort-replication
+# reasoning right on the first attempt and only failed on contract
+# ambiguities (now fixed in instruction.md) -- round 5 exists because the
+# actual gene-selection judgment call wasn't hard enough yet, not because
+# the round-4 mechanism was unsound. Write these in your own voice from
 # task/solution/process.md and the calibration record in task/README.md.
 # Do not have an LLM write these -- see the note at the top of
 # instruction.md.
-difficulty_explanation = "REPLACE: name the scientific/reasoning bottleneck (the true gene has a real effect in both cohorts with ordinary effect-size heterogeneity, not a clean single-cohort signal, so no cohort can just be thrown out; a competing gene's much larger, cohort2-only effect is driven by a latent factor that has to be inferred from expression structure, not read off a column; and a third gene is genuinely more consistent across cohorts but has weaker overall evidence, forcing an explicit tradeoff rather than a lookup), why it's genuinely hard (three layered code defects gate reaching the reconciliation step at all, and naive pooling, trusting one cohort, and a sign-blind meta-analysis each look like a reasonable finished analysis and each land on a different answer), and who does this work (a computational biologist reconciling two replicate cohorts and a plausible-but-technical hit before a go/no-go call)."
-solution_explanation = "REPLACE: summarize solve.py's actual strategy -- fix the crash and the alignment bugs, split by cohort instead of pooling, run the same DE procedure independently per cohort, require nominal same-signed significance independently in both cohorts before trusting a candidate, prefer the strongest combined evidence (not just the most consistent) among candidates that clear that bar, and report which competing gene was rejected and why its evidence doesn't generalize."
-verification_explanation = "REPLACE: describe the independent per-cohort recomputation and replication-plus-evidence-strength selection in test_outputs.py, and justify the tolerances against the specific wrong-scenario margins recorded in task/README.md's calibration table (naive pooling gets the gene right but both numeric fields wrong; trusting cohort2 alone and the sign-blind meta-analysis both fail top_gene, cohort1_log2_fold_change, heterogeneity_assessment, and rejected_competing_gene together; preferring consistency over strength names a real gene that still fails every numeric field)."
+difficulty_explanation = "REPLACE: name the scientific/reasoning bottleneck (up to three genes clear a naive per-cohort-replication bar at once, and the strongest overall isn't the most consistent one, nor the one with the single most dramatic cohort-specific number; the technical-artifact gene now also clears nominal significance in its 'null' cohort, so a same-sign check is required, not just a significance check; and a real, sign-reversing biological effect exists that must NOT be treated as the technical artifact despite superficially resembling it), why it's genuinely hard (three layered code defects gate reaching the reconciliation step at all, and naive pooling, trusting one cohort, a sign-blind meta-analysis, and a consistency-only heuristic each look like a reasonable finished analysis and most land on a different, wrong answer), and who does this work (a computational biologist reconciling two replicate cohorts, a plausible-but-technical hit, and a plausible-but-weaker hit before a go/no-go call)."
+solution_explanation = "REPLACE: summarize solve.py's actual strategy -- fix the crash and the alignment bugs, split by cohort instead of pooling, run the same DE procedure independently per cohort, require BOTH nominal significance AND same-signed effect direction independently in both cohorts before trusting a candidate, prefer the strongest combined evidence (not just the most consistent, and not just the most dramatic single-cohort number) among candidates that clear that bar, and report which competing gene was rejected and why its evidence doesn't generalize -- distinguishing a genuine technical artifact from a real-but-heterogeneous biological effect that also fails the same-sign check."
+verification_explanation = "REPLACE: describe the independent per-cohort recomputation and replication-plus-evidence-strength selection in test_outputs.py (unchanged algorithm from round 4 -- round 5 only recalibrated the data), and justify the tolerances against the specific wrong-scenario margins recorded in task/README.md's calibration table (naive pooling now fails top_gene outright, not just the numeric fields; trusting cohort2 alone and the sign-blind meta-analysis fail differently -- one on wrong gene, the other only defensible as method by coincidence; preferring consistency over strength names a real gene now only ~6x weaker in combined evidence, a genuine near-miss; and citing the real-heterogeneity gene as rejected_competing_gene instead of the genuine technical artifact is wrong despite both individually clearing per-cohort significance)."
 
 [verifier]
 timeout_sec = 300.0
