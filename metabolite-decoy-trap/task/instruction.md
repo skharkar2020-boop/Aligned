@@ -86,6 +86,12 @@ A JSON object reporting, for **each of the three candidates** (`parent`,
 - `{species}_lagged_min_loo_r`: the minimum Pearson correlation (same basis
   as `lagged_pd_r`) obtained after removing any single subject, one at a
   time.
+- `{species}_spearman_naive_pd_r`: the Spearman rank correlation (same basis
+  as `naive_pd_r`: `auc0_6` vs. PD response, single-dose subjects).
+- `{species}_bootstrap_pd_r_ci_low`: the 2.5th percentile of the Pearson
+  correlation (same basis as `naive_pd_r`) across at least 1,000 bootstrap
+  resamples (sampling subjects with replacement, same sample size each
+  draw).
 
 Additionally, for `M1` and `M2` only:
 

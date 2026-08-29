@@ -119,6 +119,22 @@ def leave_one_out_min(x: np.ndarray, y: np.ndarray) -> float:
     return min(vals) if vals else 0.0
 
 
+def spearman(x: np.ndarray, y: np.ndarray) -> float:
+    x, y = pd.Series(x).rank().to_numpy(), pd.Series(y).rank().to_numpy()
+    return pearson(x, y)
+
+
+def bootstrap_ci_low(x: np.ndarray, y: np.ndarray, n_draws: int = 2000, seed: int = 42) -> float:
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    n = len(x)
+    rng = np.random.default_rng(seed)
+    draws = []
+    for _ in range(n_draws):
+        idx = rng.integers(0, n, n)
+        draws.append(pearson(x[idx], y[idx]))
+    return float(np.percentile(draws, 2.5))
+
+
 def main() -> None:
     pk = pd.read_csv(DATA_DIR / "pk_concentrations.csv")
     pd_response = pd.read_csv(DATA_DIR / "pd_response.csv")[["subject_id", "response"]]
@@ -161,6 +177,8 @@ def main() -> None:
         result[f"{a}_lagged_pd_r"] = round(lag_r[a], 4)
         result[f"{a}_naive_min_loo_r"] = round(leave_one_out_min(sa["auc0_6"], sa["response"]), 4)
         result[f"{a}_lagged_min_loo_r"] = round(leave_one_out_min(ma["relevant_auc"], ma["response"]), 4)
+        result[f"{a}_spearman_naive_pd_r"] = round(spearman(sa["auc0_6"], sa["response"]), 4)
+        result[f"{a}_bootstrap_pd_r_ci_low"] = round(bootstrap_ci_low(sa["auc0_6"].to_numpy(), sa["response"].to_numpy()), 4)
 
     for a in ["M1", "M2"]:
         ss_auctau = multi[multi["analyte"] == a]["relevant_auc"].mean()

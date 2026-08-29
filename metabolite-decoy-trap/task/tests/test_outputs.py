@@ -11,7 +11,12 @@ of the data (tests/data/, byte-identical to environment/data/) and checks:
     method);
   - result.json has the correct schema, finite values in valid ranges, and
     every reported aggregate is consistent with an independent
-    recomputation from subject_metrics-level data;
+    recomputation from subject_metrics-level data. Two of the required
+    fields (spearman_naive_pd_r, bootstrap_pd_r_ci_low) are real,
+    independently-recomputed statistics but are NOT part of the nomination
+    decision below -- they exist to prevent an agent from using "which
+    fields sound most statistically sophisticated" as a proxy for "which
+    fields determine the answer";
   - the nominated species is the one that simultaneously dominates the
     other two candidates on all three disclosed decision criteria
     (cohort-adjusted, repeated-dose, and lagged/sustained-exposure
@@ -43,6 +48,7 @@ RESULT_KEYS = {"nominated_species"} | {
     for suffix in (
         "cmax", "tmax_hr", "naive_pd_r", "cohort_adjusted_pd_r",
         "repeated_dose_pd_r", "lagged_pd_r", "naive_min_loo_r", "lagged_min_loo_r",
+        "spearman_naive_pd_r", "bootstrap_pd_r_ci_low",
     )
 } | {f"{a}_accumulation_ratio" for a in ("M1", "M2")}
 
@@ -56,6 +62,13 @@ SUBJECT_METRIC_ABS_FLOOR = 0.05
 # trapezoidal integral.
 AGG_CORR_TOL = 0.02
 AGG_RATIO_REL_TOL = 0.05
+# bootstrap_pd_r_ci_low is a Monte Carlo estimate (2.5th percentile over
+# resamples), not a deterministic quantity like the other correlation
+# fields -- seed-to-seed variance at >=1000 draws was measured at
+# std ~0.01-0.02 across 20 independent seeds on the shipped dataset, so
+# this tolerance comfortably covers legitimate resampling noise while
+# still catching a materially wrong computation.
+BOOTSTRAP_TOL = 0.08
 # Nominated species must beat the best of the other two candidates by at
 # least this much on each of the three disclosed decision criteria,
 # independently, in the verifier's own recomputation -- chosen well below
@@ -142,6 +155,22 @@ def leave_one_out_min(x, y) -> float:
     return min(vals) if vals else 0.0
 
 
+def spearman(x, y) -> float:
+    x, y = pd.Series(x).rank().to_numpy(), pd.Series(y).rank().to_numpy()
+    return pearson(x, y)
+
+
+def bootstrap_ci_low(x, y, n_draws: int = 2000, seed: int = 1234) -> float:
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    n = len(x)
+    rng = np.random.default_rng(seed)
+    draws = []
+    for _ in range(n_draws):
+        idx = rng.integers(0, n, n)
+        draws.append(pearson(x[idx], y[idx]))
+    return float(np.percentile(draws, 2.5))
+
+
 def within_tol(reported: float, recomputed: float, rel_tol: float, abs_floor: float) -> bool:
     if not (math.isfinite(reported) and math.isfinite(recomputed)):
         return False
@@ -190,6 +219,8 @@ def recomputed_population(raw_data, recomputed_subject_metrics) -> dict[str, dic
             "lagged_pd_r": pearson(ma["relevant_auc"], ma["response"]),
             "naive_min_loo_r": leave_one_out_min(sa["auc0_6"], sa["response"]),
             "lagged_min_loo_r": leave_one_out_min(ma["relevant_auc"], ma["response"]),
+            "spearman_naive_pd_r": spearman(sa["auc0_6"], sa["response"]),
+            "bootstrap_pd_r_ci_low": bootstrap_ci_low(sa["auc0_6"].to_numpy(), sa["response"].to_numpy()),
         }
         if a in ("M1", "M2"):
             ss_auctau = mua["relevant_auc"].mean()
@@ -258,7 +289,7 @@ def test_result_schema_and_finite_values(result):
     assert result["nominated_species"] in ANALYTES
 
     for a in ANALYTES:
-        for suffix in ("naive_pd_r", "cohort_adjusted_pd_r", "repeated_dose_pd_r", "lagged_pd_r", "naive_min_loo_r", "lagged_min_loo_r"):
+        for suffix in ("naive_pd_r", "cohort_adjusted_pd_r", "repeated_dose_pd_r", "lagged_pd_r", "naive_min_loo_r", "lagged_min_loo_r", "spearman_naive_pd_r", "bootstrap_pd_r_ci_low"):
             value = result[f"{a}_{suffix}"]
             assert isinstance(value, (int, float)) and not isinstance(value, bool)
             assert math.isfinite(float(value))
@@ -277,11 +308,16 @@ def test_result_schema_and_finite_values(result):
 def test_reported_aggregates_match_independent_recomputation(result, recomputed_population):
     for a in ANALYTES:
         ref = recomputed_population[a]
-        for suffix in ("naive_pd_r", "cohort_adjusted_pd_r", "repeated_dose_pd_r", "lagged_pd_r", "naive_min_loo_r", "lagged_min_loo_r"):
+        for suffix in ("naive_pd_r", "cohort_adjusted_pd_r", "repeated_dose_pd_r", "lagged_pd_r", "naive_min_loo_r", "lagged_min_loo_r", "spearman_naive_pd_r"):
             reported = float(result[f"{a}_{suffix}"])
             assert abs(reported - ref[suffix]) <= AGG_CORR_TOL, (
                 f"{a}_{suffix}={reported} inconsistent with independent recomputation {ref[suffix]:.3f}"
             )
+        reported_boot = float(result[f"{a}_bootstrap_pd_r_ci_low"])
+        assert abs(reported_boot - ref["bootstrap_pd_r_ci_low"]) <= BOOTSTRAP_TOL, (
+            f"{a}_bootstrap_pd_r_ci_low={reported_boot} inconsistent with independent recomputation "
+            f"{ref['bootstrap_pd_r_ci_low']:.3f} (tolerance {BOOTSTRAP_TOL} accounts for Monte Carlo resampling noise)"
+        )
         for suffix in ("cmax", "tmax_hr"):
             reported = float(result[f"{a}_{suffix}"])
             assert within_tol(reported, ref[suffix], SUBJECT_METRIC_REL_TOL, SUBJECT_METRIC_ABS_FLOOR), (
