@@ -272,9 +272,22 @@ def test_top_gene_matches_independent_recomputation(result: dict[str, object], r
 
 
 def test_analysis_strategy_matches_recomputation(result: dict[str, object], reference: dict[str, object]) -> None:
+    """Deliberately not part of CHECKS: analysis_strategy must be one of the
+    five valid codes (enforced in test_result_schema_and_finite_values) and
+    is graded on the OUTCOME it produced -- top_gene, both cohort fold
+    changes, heterogeneity_assessment, and rejected_competing_gene all
+    match independently -- not on an exact match to the single reference
+    code. Requiring the literal string here, on top of every downstream
+    field already agreeing with the correct answer, would grade whether the
+    agent could guess this task's internal label for its own reasoning
+    rather than whether that reasoning was actually sound. Kept as a
+    function (not deleted) so the comparison is still documented and
+    available for manual inspection when reading a submitted result.
+    """
     assert result["analysis_strategy"] == reference["analysis_strategy"], (
         f"reported analysis_strategy {result['analysis_strategy']!r} does not match the strategy "
-        f"that actually survives scrutiny on this data ({reference['analysis_strategy']!r})"
+        f"that actually survives scrutiny on this data ({reference['analysis_strategy']!r}) -- "
+        f"informational only, not part of CHECKS"
     )
 
 
@@ -348,7 +361,6 @@ CHECKS = [
     test_result_schema_and_finite_values,
     test_all_samples_were_id_verified,
     test_top_gene_matches_independent_recomputation,
-    test_analysis_strategy_matches_recomputation,
     test_cohort_log2_fold_changes_match_recomputation,
     test_heterogeneity_assessment_matches_recomputation,
     test_rejected_competing_gene_matches_recomputation,
