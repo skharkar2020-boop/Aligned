@@ -37,7 +37,9 @@ Use one of the following values for `analysis_strategy`, choosing whichever one 
 * `strategy_b` — use only cohort1's samples.
 * `strategy_c` — use only cohort2's samples.
 * `strategy_d` — analyze each cohort separately, then combine the two cohorts' effect-size estimates into one using a formal meta-analysis procedure.
-* `strategy_e` — analyze each cohort separately, and treat a candidate gene as trustworthy only if it independently shows a significant effect in each cohort on its own, rather than mathematically combining the two cohorts' results into a single number.
+* `strategy_e` — analyze each cohort separately, and treat a candidate gene as trustworthy only if it independently shows a significant effect in each cohort on its own, with the effect pointing in the same direction in both cohorts, rather than mathematically combining the two cohorts' results into a single number.
+
+More than one of these strategies can look like a reasonable choice on its own, and the resulting nomination and supporting numbers will differ depending on which one was actually used. The value reported here should be the one that genuinely describes how the final, defensible answer was reached, not simply a plausible-sounding label.
 
 `log2_fold_change` and `adjusted_p_value` should be the nominated gene's own statistics from whichever single cohort gives it the stronger statistical support — not a pooled or averaged figure. `cohort1_log2_fold_change` and `cohort2_log2_fold_change` are where each cohort's own individual estimate belongs.
 
