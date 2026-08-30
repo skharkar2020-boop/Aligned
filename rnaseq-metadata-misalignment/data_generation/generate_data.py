@@ -424,27 +424,32 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
     }
 
 
-def write_prior_report(public_dir: Path, designed_gene_symbols: dict, ground_truth: dict) -> None:
-    """A stale prior report the agent will find alongside the pipeline: it
-    names the right gene, but from a much smaller, single-cohort pilot with
-    different numbers -- present so blindly copying it fails the numeric
-    tolerances, and independent recomputation is still required.
+def write_prior_report(public_dir: Path) -> None:
+    """A prior-phase report the agent will find alongside the pipeline.
+
+    Deliberately does NOT name a gene or give gene-identifying numbers --
+    an earlier design named the correct gene outright (with only the
+    numbers made stale), which review caught as a genuine anti-cheat leak:
+    naming the gene at all hands over the task's central judgment call
+    regardless of whether the accompanying numbers are wrong. This version
+    establishes the same "don't trust historical claims blindly, reproduce
+    independently" narrative purely through methodology caveats, with
+    nothing in the file that narrows down which of the 300 genes is the
+    intended answer.
     """
-    true_symbol = designed_gene_symbols["TRUE_GENE"]
-    pilot_log2fc = round(ground_truth["cohort1_log2_fold_change"] - 0.9, 2)
-    pilot_padj = 8.1e-3
     text = (
         "# Prior pilot analysis (archival)\n\n"
-        f"Compound-response pilot, n=3 control / n=3 treated (single site, no "
-        "confirmatory cohort). Top transcriptional responder:\n\n"
-        f"- gene: {true_symbol}\n"
-        f"- log2 fold-change (treated vs. control): {pilot_log2fc}\n"
-        f"- adjusted p-value: {pilot_padj:.1e}\n\n"
-        "This pilot was underpowered and predates the confirmatory cohort2 "
-        "run. Do not report these numbers directly -- they are provided as "
-        "historical context only and must be independently reproduced "
-        "against the current data before being cited in any go/no-go "
-        "decision.\n"
+        "An earlier, single-site pilot (n=3 control / n=3 treated, no "
+        "confirmatory cohort) reported a candidate transcriptional "
+        "response to the compound. The pilot's sample size was too small "
+        "to support a reliable conclusion on its own, and it predates the "
+        "confirmatory cohort2 run entirely.\n\n"
+        "The pilot's underlying data and summary tables were not retained "
+        "alongside this repository. Any claim about which gene responded, "
+        "or by how much, needs to be established independently from the "
+        "current two-cohort dataset -- the existence of this pilot is not "
+        "itself evidence for or against any specific candidate, and its "
+        "prior conclusion should not be assumed to be correct.\n"
     )
     (public_dir / "prior_pilot_report.md").write_text(text)
 
@@ -469,7 +474,7 @@ def main() -> None:
     expr_public.to_csv(public_dir / "expression_matrix.csv")
 
     ground_truth = lock_ground_truth(counts_df, metadata)
-    write_prior_report(public_dir, designed_gene_symbols, ground_truth)
+    write_prior_report(public_dir)
 
     ground_truth["designed_gene_positions"] = designed_positions
     ground_truth["designed_gene_symbols"] = designed_gene_symbols

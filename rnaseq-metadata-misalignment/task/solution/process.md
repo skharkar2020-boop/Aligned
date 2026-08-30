@@ -175,12 +175,11 @@ what makes reconciling them a judgment call rather than a lookup.
    relate to each other (consistent, or stronger in one cohort than the
    other), which cohort's own top hit was rejected and why, and the
    verified per-sample ID count.
-5. A prior report exists on disk naming the same gene from an earlier,
-   much smaller, single-cohort pilot. Its numbers do not match this
-   dataset's independently recomputed result (different n, no
-   confirmatory cohort) and are not sufficient evidence on their own --
-   the analysis has to be reproduced from the current data, not copied
-   from that file.
+5. A prior report exists on disk describing an earlier, much smaller,
+   single-cohort pilot -- deliberately without naming a gene or giving
+   numbers specific enough to identify one, so it cannot function as an
+   answer shortcut. It is not sufficient evidence on its own; the
+   analysis has to be established entirely from the current data.
 
 ## Steps
 

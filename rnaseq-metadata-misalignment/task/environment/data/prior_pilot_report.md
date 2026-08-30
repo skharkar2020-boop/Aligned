@@ -1,9 +1,5 @@
 # Prior pilot analysis (archival)
 
-Compound-response pilot, n=3 control / n=3 treated (single site, no confirmatory cohort). Top transcriptional responder:
+An earlier, single-site pilot (n=3 control / n=3 treated, no confirmatory cohort) reported a candidate transcriptional response to the compound. The pilot's sample size was too small to support a reliable conclusion on its own, and it predates the confirmatory cohort2 run entirely.
 
-- gene: CACNA619
-- log2 fold-change (treated vs. control): 1.23
-- adjusted p-value: 8.1e-03
-
-This pilot was underpowered and predates the confirmatory cohort2 run. Do not report these numbers directly -- they are provided as historical context only and must be independently reproduced against the current data before being cited in any go/no-go decision.
+The pilot's underlying data and summary tables were not retained alongside this repository. Any claim about which gene responded, or by how much, needs to be established independently from the current two-cohort dataset -- the existence of this pilot is not itself evidence for or against any specific candidate, and its prior conclusion should not be assumed to be correct.

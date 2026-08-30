@@ -139,17 +139,22 @@ separately:
 ## The prior pilot report
 
 `environment/data/prior_pilot_report.md` is a short, agent-visible file
-naming the correct top gene from an earlier, much smaller, single-cohort
-pilot (no confirmatory cohort). Its log2 fold-change and adjusted p-value
-are deliberately different from (and outside tolerance of) the values this
-dataset's independently recomputed analysis produces. It exists so that
-correctly *naming* the right gene is not sufficient on its own -- an agent
-that finds this file and copies its numbers instead of recomputing them
-fails the numeric checks even though the gene name is right. It is
-generated fresh alongside the rest of the public data
-(`write_prior_report` in `generate_data.py`) so its numbers stay internally
-consistent (`true log2FC - 0.9`) across regenerations rather than being a
-fixed, hand-written value.
+describing an earlier, much smaller, single-cohort pilot (no confirmatory
+cohort) -- deliberately without naming a gene or giving any number
+specific enough to identify one. An earlier design named the correct gene
+outright, with only the accompanying numbers made stale (the idea being
+that copying those numbers would fail the numeric tolerance checks even
+though the gene name was right); `task-review`'s `anti_cheat_robustness`
+criterion correctly caught this as a real leak regardless of the numbers
+being wrong -- naming the gene at all hands over the task's central
+judgment call. The current version establishes the same "don't trust
+historical claims blindly, reproduce independently" narrative purely
+through methodology caveats (small n, no confirmatory cohort, summary
+data not retained), with nothing in the file that narrows down which of
+the 300 genes is the intended answer. Generated fresh alongside the rest
+of the public data (`write_prior_report` in `generate_data.py`), and no
+longer depends on the locked ground truth at all, unlike the retired
+gene-naming version.
 
 ## Bug-layer design and empirical verification
 

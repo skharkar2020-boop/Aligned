@@ -205,10 +205,12 @@ def main() -> None:
         f"in the other -- naive pooled DE and a sign-blind combined-p "
         f"meta-analysis are both misled by that gene's outsized single-"
         f"cohort effect, and cohort2-trusting-alone reports it outright as "
-        f"the top hit. A prior pilot report on file names {top_gene} as "
-        f"well, but with different (smaller-n, single-cohort) numbers that "
-        f"do not match this independently recomputed result and are not "
-        f"sufficient evidence on their own."
+        f"the top hit. A prior pilot report on file describes an earlier, "
+        f"underpowered, single-cohort finding without giving enough detail "
+        f"to confirm or rule out any specific gene, and predates the "
+        f"confirmatory cohort2 run entirely -- it is not sufficient "
+        f"evidence on its own and does not substitute for this "
+        f"independently recomputed result."
     )
 
     result = {
