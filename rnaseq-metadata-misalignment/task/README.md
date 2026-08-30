@@ -249,24 +249,34 @@ from the project root writes `data_generation/public/*.csv` and
 
 ## Open items for the human author
 
-- `instruction.md` is the author's own round-4/5 draft (output schema and
-  both closed vocabularies stated explicitly); `task.toml`'s
+- `instruction.md` and `task.toml` are both complete -- the author wrote
   `difficulty_explanation`/`solution_explanation`/`verification_explanation`
-  still carry round-4 `REPLACE:` placeholders and need a round-5 pass in
-  the author's own voice -- the underlying science changed (five
-  competing genes now, not three; a sign-check trap; a real-heterogeneity
-  guard) even though the output schema itself did not change again in
-  round 5.
-- Neither the Docker smoke test nor `task-fixer`/`task-review` have been
-  re-run against this round's recalibration. The venv-based equivalent
-  (solve.py against the new data, verified against `test_outputs.py`,
-  using pandas/numpy/scipy matching `environment/wheels/`) was re-run here
-  and passes; every wrong-but-plausible scenario in the calibration table
-  above was independently constructed and confirmed to fail the verifier.
-  A second blind-trial screen (a subagent with no knowledge of this
-  design, given only `instruction.md` and the agent-visible files) was
-  also run after round 4 and is planned again after round 5 -- see the
-  session record for the round-4 trial's result and what it changed here.
-- Given the scope of this change, treat it as effectively a new task for
-  validation purposes: full local verification (done above), then the
-  standard fresh-agent screen before a full campaign run.
+  in their own voice, and `expert_time_estimate_hours` is set to `7.0`
+  with the reasoning behind that number in an inline comment. No
+  `REPLACE:` placeholders remain in either file.
+- `task-fixer` and `task-review` have been run locally (Docker images
+  build successfully, both well under the size limit). The latest
+  `task-review` run is FAIL, 24/30 PASS, on these open items:
+  - `well_specified` / `outcome_verified` / `test_instruction_alignment`
+    (three ratings, one underlying concern): the verifier requires
+    `analysis_strategy == strategy_e` specifically, while
+    `instruction.md` presents all five codes as a closed vocabulary to
+    *describe* whatever approach was used, not as five equally-correct
+    options. Whether this is a genuine contract gap or an intentional
+    "the shape is disclosed, the method is not" design choice (per this
+    repo's own `trajectory-review` philosophy) is an open judgment call,
+    not yet resolved.
+  - `difficulty_explanation_quality` / `verification_explanation_quality`:
+    the author's prose does not explicitly state that the data are
+    synthetic/deterministically generated, name the real-world
+    practitioner role, or justify the specific numeric tolerances
+    (`LOG2FC_ABS_TOL=0.2`, `ADJ_P_LOG10_TOL=3.0`, `ADJ_P_MAX_FOR_SIGNIFICANT=5e-4`)
+    against the wrong-scenario margins in the calibration table above.
+    Both are additions to the author's existing text, not rewrites.
+- Two blind-trial screens (a subagent with no knowledge of this design,
+  given only `instruction.md` and the agent-visible files) have been run:
+  one after round 4 (passed the science, failed only on since-fixed
+  contract ambiguities) and one after round 5 (failed genuinely, on the
+  tightened `CONSISTENCY_GENE` evidence-strength tradeoff). Neither is a
+  substitute for the real Harbor campaign and `trajectory-review`, which
+  have not been run yet.
