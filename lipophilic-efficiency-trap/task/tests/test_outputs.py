@@ -27,7 +27,6 @@ PAPP_MIN = 8.0
 
 REL_TOL = 0.01
 ABS_FLOOR = 0.02
-AGG_ABS_TOL = 0.03
 
 EXPECTED_COMPOUND_METRICS_COLUMNS = [
     "compound_id",
@@ -41,17 +40,8 @@ EXPECTED_COMPOUND_METRICS_COLUMNS = [
 EXPECTED_RESULT_KEYS = {
     "naive_top_potency_id",
     "n_developability_pass",
-    "clogp_target_potency_r",
-    "clogp_offtarget_potency_r",
     "nominated_lead_id",
 }
-
-
-def _pearson(x: np.ndarray, y: np.ndarray) -> float:
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    if np.std(x) == 0 or np.std(y) == 0:
-        return 0.0
-    return float(np.corrcoef(x, y)[0, 1])
 
 
 def _independent_recomputation() -> tuple[pd.DataFrame, dict]:
@@ -86,8 +76,6 @@ def _independent_recomputation() -> tuple[pd.DataFrame, dict]:
     result = {
         "naive_top_potency_id": naive_top_potency_id,
         "n_developability_pass": int(merged["developability_pass"].sum()),
-        "clogp_target_potency_r": _pearson(merged["clogp"], merged["pic50_target"]),
-        "clogp_offtarget_potency_r": _pearson(merged["clogp"], merged["pic50_offtarget"]),
         "nominated_lead_id": nominated_lead_id,
     }
     return compound_metrics, result
@@ -148,10 +136,6 @@ def test_result_schema_and_finite_values(submitted_result):
     assert EXPECTED_RESULT_KEYS.issubset(set(result.keys())), (
         f"missing keys: {EXPECTED_RESULT_KEYS - set(result.keys())}"
     )
-    for key in ["clogp_target_potency_r", "clogp_offtarget_potency_r"]:
-        val = result[key]
-        assert isinstance(val, (int, float)), f"{key} must be numeric, got {type(val)}"
-        assert math.isfinite(val), f"{key} is not finite: {val}"
     assert isinstance(result["n_developability_pass"], int), (
         f"n_developability_pass must be an int, got {type(result['n_developability_pass'])}"
     )
@@ -174,9 +158,6 @@ def test_reported_aggregates_match_independent_recomputation(submitted_result, e
     assert result["n_developability_pass"] == exp["n_developability_pass"], (
         f"n_developability_pass: got {result['n_developability_pass']}, expected {exp['n_developability_pass']}"
     )
-    for key in ["clogp_target_potency_r", "clogp_offtarget_potency_r"]:
-        got, want = float(result[key]), float(exp[key])
-        assert math.isclose(got, want, abs_tol=AGG_ABS_TOL), f"{key}: got {got}, expected {want}"
 
 
 def test_nominated_lead_matches_independent_recomputation(submitted_result, expected):

@@ -41,11 +41,35 @@ their rationale:
   realism; 0.06 log units (~15% CV) is still within the range of a
   well-optimized biochemical assay.
 - Developability thresholds (`solubility_um >= 20`, `clint_ul_min_mg <=
-  45`, `papp_1e6cm_s >= 8`) and the selectivity threshold
-  (`selectivity_index >= 0.6`, i.e. ~4-fold) are standard, disclosed
-  literature-typical hit-to-lead triage bars, not reverse-engineered from
-  the dataset to hit a particular answer -- the answer emerged from the
-  generative mechanism, not from picking a threshold that produces it.
+  45`, `papp_1e6cm_s >= 8`) are standard, disclosed literature-typical
+  hit-to-lead triage bars, not reverse-engineered from the dataset to hit a
+  particular answer -- the answer emerged from the generative mechanism, not
+  from picking a threshold that produces it. The selectivity threshold used
+  for the final nomination (`selectivity_index >= 0.6`, ~4-fold) is
+  standard but intentionally *undisclosed* -- see "Instruction disclosure"
+  below.
+
+## Instruction disclosure (revised after a quick-trial finding)
+
+The first version of this task disclosed `clogp_target_potency_r` and
+`clogp_offtarget_potency_r` as required `result.json` fields. A quick
+single-agent trial passed on the first attempt, and its transcript quoted
+the reported `clogp_offtarget_potency_r ~ 0.999` value directly as the
+stated reason for the nomination -- the agent didn't need to notice the
+lipophilicity/off-target relationship itself, it just read the number the
+task told it to compute and report. That made the task's actual difficulty
+close to zero: reading one field and applying a one-line inference from it.
+
+Both correlation fields (and the exact nomination formula/thresholds from
+an earlier pass, see git history) were removed from `instruction.md`,
+`solution/solve.py`, and `tests/test_outputs.py`. `result.json` now reports
+only `naive_top_potency_id` and `n_developability_pass`; the agent must
+decide on its own, from `compound_metrics.csv`'s raw columns, whether raw
+potency is confounded by lipophilicity. The lesson generalizes: a
+diagnostic aggregate that is disclosed *as a required, checked output
+field* can leak the mechanism just as effectively as disclosing the
+decision rule itself, even when every individual per-row formula stays
+disclosed (which `well_specified`/`structured_data_schema` require).
 
 ## Solution and verifier design
 
@@ -53,7 +77,8 @@ their rationale:
   every derived field is simple arithmetic on clean, already-averaged
   inputs, not a numerical approximation, so a materially different method
   should not pass.
-- `result.json` aggregate tolerance: 0.03 absolute.
+- `naive_top_potency_id` and `n_developability_pass` are checked by exact
+  match against independent recomputation.
 - `nominated_lead_id` is checked by exact string match against the
   verifier's own independent recomputation -- a discrete correctness check
   with no statistical margin to tune, unlike a correlation-based dominance

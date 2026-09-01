@@ -58,10 +58,6 @@ A JSON object with the following fields:
   `pic50_target` across all 28 compounds.
 - `n_developability_pass`: the count of compounds with
   `developability_pass == true`.
-- `clogp_target_potency_r`: the Pearson correlation, across all 28
-  compounds, between `clogp` and `pic50_target`.
-- `clogp_offtarget_potency_r`: the Pearson correlation, across all 28
-  compounds, between `clogp` and `pic50_offtarget`.
 - `nominated_lead_id`: the `compound_id` a hit-to-lead chemistry team should
   actually progress into lead optimization, using `compound_metrics.csv`
   and the other `result.json` fields above as evidence. The most potent

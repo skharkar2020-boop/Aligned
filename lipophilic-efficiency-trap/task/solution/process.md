@@ -50,25 +50,31 @@ and selectivity margin, once it clears the same developability bar.
 6. Compute `developability_pass` from the three disclosed ADME thresholds.
 7. Write `compound_metrics.csv`.
 8. In `result.json`: report `naive_top_potency_id` (argmax `pic50_target`,
-   unconditional), the two `clogp` correlations, and `n_developability_pass`.
+   unconditional) and `n_developability_pass`.
 9. For `nominated_lead_id`: this is the judgment call the instruction leaves
    to the agent. The reference solution restricts to compounds with
    `developability_pass == true` AND `selectivity_index >= 0.6` (a ~4-fold
    selectivity bar), then nominates the highest-`lle` compound within that
    set. Neither the 0.6 threshold nor the gate-then-argmax procedure is
-   stated in `instruction.md` -- an agent has to recognize, from
-   `compound_metrics.csv` and the two disclosed correlations, that raw
-   potency is confounded by lipophilicity and that a developability- and
-   selectivity-aware efficiency read is the right basis for the nomination.
+   stated in `instruction.md`, and `result.json` does not report the
+   `clogp`/potency correlations either -- an agent has to independently
+   decide to check whether raw potency is confounded by lipophilicity
+   (e.g. by inspecting `compound_metrics.csv`'s `clogp` and `pic50_offtarget`
+   columns itself) rather than being handed that diagnostic as a computed
+   output field. An earlier draft of this task reported both correlations
+   in `result.json`; a quick-trial run showed the agent using the reported
+   `clogp_offtarget_potency_r ~ 0.999` value verbatim as its stated reason
+   for the nomination, which meant the task was rewarding reading a
+   spoon-fed number rather than deriving the insight. Removed.
 
-## Validated numbers (shipped dataset)
+## Validated numbers (shipped dataset, computed internally, not disclosed)
 
 | | value |
 |---|---:|
 | `naive_top_potency_id` | C022 (pic50_target = 8.699, clogp = 5.10, fails developability gate) |
 | `nominated_lead_id` | C027 (pic50_target = 8.131, clogp = 2.36, LLE = 5.770) |
-| `top_gate_passing_lle` margin (C027 vs. 2nd-place C028) | 0.160 |
+| top gate-passing LLE margin (C027 vs. 2nd-place C028) | 0.160 |
 | `n_developability_pass` | 15 / 28 |
-| `n_gate_passing` (developability + selectivity >= 0.6) | 5 / 28 |
-| `clogp_target_potency_r` | 0.494 |
-| `clogp_offtarget_potency_r` | 0.999 |
+| gate-passing count (developability + selectivity >= 0.6) | 5 / 28 |
+| clogp vs. pic50_target correlation | 0.494 |
+| clogp vs. pic50_offtarget correlation | 0.999 |

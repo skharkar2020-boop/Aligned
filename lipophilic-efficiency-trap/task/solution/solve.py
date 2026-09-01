@@ -9,8 +9,11 @@ Conventions (must match instruction.md and the verifier exactly):
     (assay QC artifacts) are excluded entirely.
   - developability_pass requires solubility_um >= 20 AND clint_ul_min_mg <=
     45 AND papp_1e6cm_s >= 8 (all three).
-  - Gate-passing (for n_gate_passing / top_gate_passing_lle /
-    nominated_lead_id) additionally requires selectivity_index >= 0.6.
+  - nominated_lead_id is not a disclosed formula: the reference solution
+    additionally requires selectivity_index >= 0.6 among developability_pass
+    compounds, then nominates the highest-lle compound in that set. Neither
+    this threshold nor the gate-then-argmax procedure appears in
+    instruction.md or in any result.json field -- see solution/process.md.
 """
 from __future__ import annotations
 
@@ -62,33 +65,25 @@ def build_compound_metrics(assay: pd.DataFrame, adme: pd.DataFrame) -> pd.DataFr
     return out.sort_values("compound_id").reset_index(drop=True)
 
 
-def pearson(x: np.ndarray, y: np.ndarray) -> float:
-    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    if np.std(x) == 0 or np.std(y) == 0:
-        return 0.0
-    return float(np.corrcoef(x, y)[0, 1])
-
-
 def main() -> None:
     assay = pd.read_csv(DATA_DIR / "assay_results.csv")
     adme = pd.read_csv(DATA_DIR / "adme_properties.csv")
 
     compound_metrics = build_compound_metrics(assay, adme)
-    merged = compound_metrics.merge(adme[["compound_id", "clogp"]], on="compound_id")
 
-    naive_top_potency_id = merged.sort_values(
+    naive_top_potency_id = compound_metrics.sort_values(
         ["pic50_target", "compound_id"], ascending=[False, True]
     ).iloc[0]["compound_id"]
 
-    gate = merged[merged["developability_pass"] & (merged["selectivity_index"] >= SELECTIVITY_THRESHOLD)]
+    gate = compound_metrics[
+        compound_metrics["developability_pass"] & (compound_metrics["selectivity_index"] >= SELECTIVITY_THRESHOLD)
+    ]
     gate_sorted = gate.sort_values(["lle", "compound_id"], ascending=[False, True])
     nominated_lead_id = gate_sorted.iloc[0]["compound_id"]
 
     result = {
         "naive_top_potency_id": naive_top_potency_id,
-        "n_developability_pass": int(merged["developability_pass"].sum()),
-        "clogp_target_potency_r": round(pearson(merged["clogp"], merged["pic50_target"]), 4),
-        "clogp_offtarget_potency_r": round(pearson(merged["clogp"], merged["pic50_offtarget"]), 4),
+        "n_developability_pass": int(compound_metrics["developability_pass"].sum()),
         "nominated_lead_id": nominated_lead_id,
     }
 
