@@ -1,0 +1,34 @@
+# Kinase X Hit-to-Lead Lead Nomination
+
+An in-vitro profiling analysis was conducted across all 28 analogs (`C001`–`C028`) from the Kinase X hit-to-lead chemistry series. Quality control filtering was applied to exclude all `fail`-flagged replicates prior to metric calculations.
+
+## Summary of Results
+
+1. **Deliverable Files Generated:**
+   - [`/workspace/output/compound_metrics.csv`](file:///workspace/output/compound_metrics.csv): Profiling metrics for all 28 compounds.
+   - [`/workspace/output/result.json`](file:///workspace/output/result.json): Lead nomination summary.
+
+2. **Key Findings (`result.json`):**
+   - **`naive_top_potency_id`**: `"C022"`
+     - Primary target $\text{pIC}_{50} = 8.70$ ($\text{IC}_{50} \approx 2.0\text{ nM}$). However, `C022` fails ADME developability due to high lipophilicity ($\text{cLogP} = 5.10$), low permeability ($P_{\text{app}} = 2.52 \times 10^{-6}\text{ cm/s} < 8$), high metabolic turnover ($\text{CL}_{\text{int}} = 50.49\,\mu\text{L/min/mg} > 45$), and poor selectivity margin ($0.63\text{ log units}$).
+   - **`n_developability_pass`**: `15`
+     - 15 out of 28 compounds satisfy all developability criteria ($\text{Solubility} \ge 20\,\mu\text{M}$, $\text{CL}_{\text{int}} \le 45\,\mu\text{L/min/mg}$, $P_{\text{app}} \ge 8 \times 10^{-6}\text{ cm/s}$).
+   - **`nominated_lead_id`**: `"C027"`
+
+---
+
+## Nominated Lead Rationale: Compound `C027`
+
+`C027` is the clear lead nomination to progress into lead optimization based on the following compelling evidence:
+
+1. **Highest Target Potency Among Developable Analogs:**
+   - Primary target $\text{pIC}_{50} = 8.13$ ($\text{IC}_{50} = 7.4\text{ nM}$), making it the most potent compound among all 15 developability-passing analogs.
+2. **Superior Selectivity Profile:**
+   - Selectivity Index ($\text{pIC}_{50,\text{target}} - \text{pIC}_{50,\text{offtarget}}) = 1.59$ ($\sim 39\text{-fold}$ selective over the Kinase X-related off-target paralog liability).
+3. **Top Ligand Efficiencies Across the Entire Series:**
+   - Lipophilic Ligand Efficiency ($\text{LLE} = 5.77$) is the **highest across all 28 compounds** ($\text{cLogP} = 2.36$).
+   - Ligand Efficiency ($\text{LE} = 0.356$) is the **highest across all 28 compounds** ($\text{HAC} = 32$, $\text{MW} = 429.5\text{ Da}$).
+4. **Favorable In-Vitro ADME / Developability Profile:**
+   - Kinetic aqueous solubility $= 151.6\,\mu\text{M}$ (pass threshold $\ge 20$).
+   - Human liver microsomal metabolic stability $\text{CL}_{\text{int}} = 33.85\,\mu\text{L/min/mg}$ (pass threshold $\le 45$).
+   - Caco-2 cell permeability $P_{\text{app}} = 12.72 \times 10^{-6}\text{ cm/s}$ (pass threshold $\ge 8$).

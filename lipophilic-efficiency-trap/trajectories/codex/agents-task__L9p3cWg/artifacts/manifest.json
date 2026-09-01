@@ -1,0 +1,23 @@
+[
+  {
+    "source": "/logs/artifacts",
+    "destination": "artifacts/logs/artifacts",
+    "type": "directory",
+    "status": "ok",
+    "service": null
+  },
+  {
+    "source": "/workspace/output/result.json",
+    "destination": "artifacts/workspace/output/result.json",
+    "type": "file",
+    "status": "ok",
+    "service": null
+  },
+  {
+    "source": "/workspace/output/compound_metrics.csv",
+    "destination": "artifacts/workspace/output/compound_metrics.csv",
+    "type": "file",
+    "status": "ok",
+    "service": null
+  }
+]

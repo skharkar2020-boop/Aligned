@@ -1,0 +1,165 @@
+{
+  "run_id": "hr_LqvPpunsm56En9KO70jhDA",
+  "complete": true,
+  "oracle": {
+    "verdict": "PASS",
+    "reward": 1,
+    "exception": null,
+    "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/oracle.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-oracle/oracle-task__dqD4dw7/result.json"
+  },
+  "trials": [
+    {
+      "trial_id": "claude-opus-001",
+      "phase": "agent",
+      "agent_id": "claude-opus",
+      "attempt": 1,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-claude-opus/agents-task__EgFPm2R/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/claude-code/agents-task__EgFPm2R"
+    },
+    {
+      "trial_id": "claude-opus-002",
+      "phase": "agent",
+      "agent_id": "claude-opus",
+      "attempt": 2,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-claude-opus/agents-task__JEm2PgP/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/claude-code/agents-task__JEm2PgP"
+    },
+    {
+      "trial_id": "claude-opus-003",
+      "phase": "agent",
+      "agent_id": "claude-opus",
+      "attempt": 3,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-claude-opus/agents-task__Ld4bxJ7/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/claude-code/agents-task__Ld4bxJ7"
+    },
+    {
+      "trial_id": "claude-opus-004",
+      "phase": "agent",
+      "agent_id": "claude-opus",
+      "attempt": 4,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-claude-opus/agents-task__WXPvbcp/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/claude-code/agents-task__WXPvbcp"
+    },
+    {
+      "trial_id": "codex-gpt-5-6-sol-001",
+      "phase": "agent",
+      "agent_id": "codex-gpt-5-6-sol",
+      "attempt": 1,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-codex-gpt-5-6-sol/agents-task__G7NZHWg/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/codex/agents-task__G7NZHWg"
+    },
+    {
+      "trial_id": "codex-gpt-5-6-sol-002",
+      "phase": "agent",
+      "agent_id": "codex-gpt-5-6-sol",
+      "attempt": 2,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-codex-gpt-5-6-sol/agents-task__L9p3cWg/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/codex/agents-task__L9p3cWg"
+    },
+    {
+      "trial_id": "codex-gpt-5-6-sol-003",
+      "phase": "agent",
+      "agent_id": "codex-gpt-5-6-sol",
+      "attempt": 3,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-codex-gpt-5-6-sol/agents-task__bDULTEk/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/codex/agents-task__bDULTEk"
+    },
+    {
+      "trial_id": "codex-gpt-5-6-sol-004",
+      "phase": "agent",
+      "agent_id": "codex-gpt-5-6-sol",
+      "attempt": 4,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-codex-gpt-5-6-sol/agents-task__q3drizw/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/codex/agents-task__q3drizw"
+    },
+    {
+      "trial_id": "gemini-flash-001",
+      "phase": "agent",
+      "agent_id": "gemini-flash",
+      "attempt": 1,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-gemini-flash/agents-task__L4Vqz9k/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/antigravity/agents-task__L4Vqz9k"
+    },
+    {
+      "trial_id": "gemini-flash-002",
+      "phase": "agent",
+      "agent_id": "gemini-flash",
+      "attempt": 2,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-gemini-flash/agents-task__QH7phas/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/antigravity/agents-task__QH7phas"
+    },
+    {
+      "trial_id": "gemini-flash-003",
+      "phase": "agent",
+      "agent_id": "gemini-flash",
+      "attempt": 3,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-gemini-flash/agents-task__reGrqmD/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/antigravity/agents-task__reGrqmD"
+    },
+    {
+      "trial_id": "gemini-flash-004",
+      "phase": "agent",
+      "agent_id": "gemini-flash",
+      "attempt": 4,
+      "verdict": "PASS",
+      "reward": 1,
+      "finished_at": "2026-09-01T19:27:46.938Z",
+      "exception": null,
+      "result_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#jobs/hr_LqvPpunsm56En9KO70jhDA-gemini-flash/agents-task__zXMDgQK/result.json",
+      "trajectory_ref": "harbor-runs/hr_LqvPpunsm56En9KO70jhDA/internal/executor/agents.tar.gz#trajectories/antigravity/agents-task__zXMDgQK"
+    }
+  ],
+  "summary": {
+    "oracle_passed": true,
+    "agent_trials_expected": 12,
+    "agent_trials_finished": 12,
+    "pass_count": 12,
+    "fail_count": 0,
+    "exception_count": 0,
+    "incomplete_count": 0
+  }
+}

@@ -1,0 +1,33 @@
+Based on the in vitro activity and ADME profiling across the 28 analogs (`C001`–`C028`), **`C027`** is nominated as the lead compound to progress into lead optimization.
+
+---
+
+### Summary of Results
+
+#### Key Findings (`result.json`)
+- **`naive_top_potency_id`**: **`C022`**
+  - Most potent against Kinase X in raw terms ($\text{pIC}_{50} = 8.70$, $\text{IC}_{50} = 2.0\text{ nM}$), but has poor permeability ($P_{\text{app}} = 2.52$), high metabolic clearance ($\text{CL}_{\text{int}} = 50.49$), excessive lipophilicity ($c\text{Log}P = 5.095$), and a narrow selectivity margin ($0.63\text{ log units}$, $\approx 4.3$-fold).
+- **`n_developability_pass`**: **`15`** compounds meet all developability criteria ($\text{Solubility} \ge 20\ \mu\text{M}$, $\text{CL}_{\text{int}} \le 45\ \mu\text{L/min/mg}$, $P_{\text{app}} \ge 8 \times 10^{-6}\text{ cm/s}$).
+- **`nominated_lead_id`**: **`C027`**
+
+---
+
+### Rationale for Nominating `C027`
+
+1. **Sub-10 nM Target Potency**: `C027` displays strong target inhibition with a target $\text{pIC}_{50}$ of **`8.131`** ($\text{IC}_{50} = 7.39\text{ nM}$).
+2. **Best-in-Class Target Selectivity**: `C027` achieves the **highest selectivity index** across the entire 28-compound series at **`1.588 log units`** ($\approx 38.7$-fold selectivity for Kinase X over the off-target paralog).
+3. **Superior Efficiency Profiles**: `C027` leads the series in both:
+   - **Lipophilic Ligand Efficiency (LLE)**: **`5.770`** ($\text{pIC}_{50} - c\text{Log}P$, indicating efficient binding relative to lipophilicity).
+   - **Ligand Efficiency (LE)**: **`0.356`** ($1.4 \times \text{pIC}_{50} / \text{heavy\_atom\_count}$).
+4. **Clean Developability & ADME Profile**: `C027` satisfies all developability filters (`developability_pass` = `true`):
+   - **Aqueous Solubility**: $151.59\ \mu\text{M}$ (Filter: $\ge 20\ \mu\text{M}$)
+   - **Microsomal Stability ($\text{CL}_{\text{int}}$)**: $33.85\ \mu\text{L/min/mg}$ (Filter: $\le 45\ \mu\text{L/min/mg}$)
+   - **Caco-2 Permeability ($P_{\text{app}}$)**: $12.72 \times 10^{-6}\text{ cm/s}$ (Filter: $\ge 8 \times 10^{-6}\text{ cm/s}$)
+   - **Physicochemical Properties**: Moderate $c\text{Log}P$ ($2.361$) and MW ($429.53\text{ Da}$).
+
+---
+
+### Output Files Generated
+
+- [compound_metrics.csv](file:///workspace/output/compound_metrics.csv)
+- [result.json](file:///workspace/output/result.json)

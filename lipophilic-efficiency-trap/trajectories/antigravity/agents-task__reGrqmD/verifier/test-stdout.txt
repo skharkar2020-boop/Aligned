@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-8.4.1, pluggy-1.6.0
+rootdir: /tests
+plugins: json-ctrf-0.3.5
+collected 5 items
+
+../tests/test_outputs.py .....                                           [100%]
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../tests/test_outputs.py::test_compound_metrics_schema_and_completeness
+PASSED ../tests/test_outputs.py::test_compound_metrics_values_match_recomputation
+PASSED ../tests/test_outputs.py::test_result_schema_and_finite_values
+PASSED ../tests/test_outputs.py::test_reported_aggregates_match_independent_recomputation
+PASSED ../tests/test_outputs.py::test_nominated_lead_matches_independent_recomputation
+============================== 5 passed in 0.49s ===============================

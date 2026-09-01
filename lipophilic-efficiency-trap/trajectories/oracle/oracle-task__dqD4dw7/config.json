@@ -1,0 +1,15 @@
+{
+    "task": {
+        "path": "/tmp/workbench-harbor-eu0idgov/oracle-task"
+    },
+    "trial_name": "oracle-task__dqD4dw7",
+    "trials_dir": "/tmp/workbench-harbor-eu0idgov/jobs/hr_LqvPpunsm56En9KO70jhDA-oracle",
+    "environment": {
+        "type": "modal",
+        "delete": false,
+        "kwargs": {
+            "app_name": "workbench-harbor-hr_LqvPpunsm56En9KO70jhDA-4a542c8e016c"
+        }
+    },
+    "job_id": "862b9af5-70c1-4a05-a82c-99e2eb52a3a4"
+}

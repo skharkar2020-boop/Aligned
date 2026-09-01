@@ -1,0 +1,37 @@
+# Kinase X Hit-to-Lead Lead Nomination Summary
+
+The hit-to-lead chemistry dataset for Kinase X (28 analogs, `C001`–`C028`) was analyzed to select a lead compound for optimization based on target potency, selectivity against Kinase X-related off-target paralog, ligand efficiency (LE/LLE), and ADME/developability criteria.
+
+---
+
+## Key Analysis Findings
+
+1. **Naive Top Potency Compound**:
+   - **`C022`** exhibited the single highest target potency ($\text{pIC}_{50} = 8.70$, $\text{IC}_{50} \approx 2.0\text{ nM}$).
+   - However, **`C022` fails the developability criteria** due to poor Caco-2 permeability ($P_{\text{app}} = 2.52 \times 10^{-6}\text{ cm/s} < 8.0$), high human liver microsomal clearance ($\text{CL}_{\text{int}} = 50.49\ \mu\text{L/min/mg} > 45.0$), and high lipophilicity ($\text{cLogP} = 5.095$).
+
+2. **Developability Filtering**:
+   - **15 out of 28 compounds** passed all developability criteria ($\text{Solubility} \ge 20\ \mu\text{M}$, $\text{CL}_{\text{int}} \le 45\ \mu\text{L/min/mg}$, and $P_{\text{app}} \ge 8 \times 10^{-6}\text{ cm/s}$).
+
+3. **Nominated Lead Compound**:
+   - **`C027`** is nominated as the lead compound to progress into lead optimization.
+   - **Rationale**:
+     - **Primary Potency**: Highest target potency ($\text{pIC}_{50} = 8.13$, $\text{IC}_{50} \approx 7.4\text{ nM}$) among all 15 developability-passing compounds.
+     - **Selectivity**: Highest selectivity margin ($\Delta\text{pIC}_{50} = +1.59$ log units, $\sim 38.7$-fold selective over Kinase X-related) across the entire 28-compound series.
+     - **Ligand Efficiency**: Outstanding Lipophilic Ligand Efficiency ($\text{LLE} = 5.77$) and Ligand Efficiency ($\text{LE} = 0.356$), the highest in the entire dataset.
+     - **ADME Profile**: Excellent aqueous solubility ($151.6\ \mu\text{M}$), moderate metabolic stability ($\text{CL}_{\text{int}} = 33.85\ \mu\text{L/min/mg}$), good permeability ($P_{\text{app}} = 12.72 \times 10^{-6}\text{ cm/s}$), and favorable lipophilicity ($\text{cLogP} = 2.36$).
+
+---
+
+## Deliverables Summary
+
+1. **`compound_metrics.csv`**: Saved to `$OUTPUT_DIR/compound_metrics.csv` containing all calculated metrics across all 28 compounds.
+2. **`result.json`**: Saved to `$OUTPUT_DIR/result.json` with the following values:
+
+```json
+{
+  "naive_top_potency_id": "C022",
+  "n_developability_pass": 15,
+  "nominated_lead_id": "C027"
+}
+```

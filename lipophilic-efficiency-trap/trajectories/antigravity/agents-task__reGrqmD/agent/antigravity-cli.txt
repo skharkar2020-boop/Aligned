@@ -1,0 +1,28 @@
+# Kinase X Hit-to-Lead Lead Nomination Summary
+
+A hit-to-lead dataset comprising 28 analogs (`C001`–`C028`) evaluated for target potency, off-target paralog selectivity, and ADME properties was analyzed.
+
+## Deliverables Generated
+- **`/workspace/output/compound_metrics.csv`**: Contains profiling metrics (`pic50_target`, `pic50_offtarget`, `selectivity_index`, `lle`, `le`, `developability_pass`) for all 28 compounds.
+- **`/workspace/output/result.json`**: Contains the summary findings and lead nomination.
+
+```json
+{
+  "naive_top_potency_id": "C022",
+  "n_developability_pass": 15,
+  "nominated_lead_id": "C027"
+}
+```
+
+---
+
+## Rationale for Lead Nomination (`C027`)
+
+While **`C022`** exhibits the highest raw target potency (`pIC50_target` = 8.70, $\text{IC}_{50} \approx 2.0\text{ nM}$), it fails the developability filter due to poor Caco-2 permeability ($\text{P}_{\text{app}} = 2.52 \times 10^{-6}\text{ cm/s} < 8.0$) and high human liver microsomal clearance ($\text{CL}_{\text{int}} = 50.49\ \mu\text{L/min/mg} > 45.0$), combined with high lipophilicity ($\text{cLogP} = 5.10$).
+
+Among the 15 analogs meeting all developability criteria ($\text{Solubility} \ge 20\ \mu\text{M}$, $\text{CL}_{\text{int}} \le 45\ \mu\text{L/min/mg}$, $\text{P}_{\text{app}} \ge 8 \times 10^{-6}\text{ cm/s}$), **`C027`** is nominated as the lead compound:
+
+1. **Target Potency**: Sub-10 nM potency against Kinase X (`pIC50_target` = 8.13, $\text{IC}_{50} \approx 7.4\text{ nM}$), the highest among all developable analogs.
+2. **Selectivity**: Outstanding selectivity margin over the off-target paralog (`selectivity_index` = 1.59 log units, corresponding to **~39-fold selectivity**), the highest across the entire 28-compound series.
+3. **Ligand Efficiency**: Outstanding efficiency metrics (`LLE` = 5.77 and `LE` = 0.356), reflecting optimal potency gain per lipophilicity and heavy atom count.
+4. **ADME Profile**: Excellent solubility ($151.6\ \mu\text{M}$), moderate clearance ($\text{CL}_{\text{int}} = 33.85\ \mu\text{L/min/mg}$), and robust permeability ($\text{P}_{\text{app}} = 12.72 \times 10^{-6}\text{ cm/s}$).

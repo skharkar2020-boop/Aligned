@@ -1,0 +1,25 @@
+{
+    "task": {
+        "path": "/tmp/workbench-harbor-4dkl5a2d/agents-task"
+    },
+    "trial_name": "agents-task__reGrqmD",
+    "trials_dir": "/tmp/workbench-harbor-4dkl5a2d/jobs/hr_LqvPpunsm56En9KO70jhDA-gemini-flash",
+    "agent_timeout_multiplier": 1.0,
+    "agent": {
+        "name": "harbor_executor.antigravity:WorkbenchAntigravityCli",
+        "model_name": "google/gemini-3.6-flash-medium",
+        "kwargs": {
+            "print_timeout_seconds": 7200,
+            "gcp_project_id": "workbench-688ed",
+            "gcp_location": "global"
+        }
+    },
+    "environment": {
+        "type": "modal",
+        "delete": false,
+        "kwargs": {
+            "app_name": "workbench-harbor-hr_LqvPpunsm56En9KO70jhDA-4a542c8e016c"
+        }
+    },
+    "job_id": "9f137191-61bc-4c09-9bcd-426190d97a5e"
+}
