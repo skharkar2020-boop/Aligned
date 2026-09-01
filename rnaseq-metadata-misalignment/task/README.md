@@ -36,10 +36,10 @@ finding: the resolution had collapsed into "one cohort is obviously
 confounded, the other is obviously clean," which is a single fact to
 discover, not an ongoing judgment call to defend.
 
-The fourth (current) round keeps everything about the third round's
-premise -- the buggy pipeline, the two-cohort structure, the requirement
-to rehabilitate an existing analysis -- but redesigns *what the two
-cohorts actually show* so that neither can be discarded wholesale:
+The fourth round kept everything about the third round's premise -- the
+buggy pipeline, the two-cohort structure, the requirement to rehabilitate
+an existing analysis -- but redesigned *what the two cohorts actually
+show* so that neither can be discarded wholesale:
 
 - The true gene now has a **real effect in both cohorts, same direction**,
   strong in `cohort1` and weaker-but-still-real in `cohort2` (ordinary,
@@ -129,12 +129,63 @@ separately:
    the `batch2`/`sample_02` device were retired for in round 3. The
    sentinel/latent-factor structure is still present in the data and
    still a legitimate thing for a thorough agent to discover and cite in
-   `rationale` (which is presence-checked, never content-graded) -- it is
-   just not a required, deterministically-graded step.
+   `rationale`, but citing it is optional -- it is not a required,
+   deterministically-graded step (see below for the one thing about
+   `rationale` that *is* content-graded).
    The existing resolution algorithm (per-cohort nominal replication +
    Fisher-combined-p tie-break among survivors) needed **no changes** to
    correctly resolve all five competing genes against the recalibrated
    data -- re-verified against the actual 300-gene panel, not projected.
+
+3. **`analysis_strategy` exact-match relaxed, then a narrower gap closed
+   in its place.** Three independent `task-review` runs kept flagging the
+   same thing even across two genuine content fixes (softened
+   `instruction.md` wording, corrected `strategy_e`'s own definition to
+   include the sign-agreement requirement it had been missing): grading
+   `analysis_strategy == "strategy_e"` exactly, on top of every other
+   field already being checked against the correct answer, amounted to an
+   undisclosed requirement to guess this task's internal label for
+   correct reasoning rather than to actually reason correctly. The exact
+   match was dropped from `CHECKS` (the comparison function itself stays
+   in `tests/test_outputs.py`, undeleted, for anyone reading a submitted
+   result by hand); `analysis_strategy` is still required to be one of
+   the five valid codes (a schema check), just not scored against the
+   reference value.
+
+   Dropping it exposed a real regression, caught before shipping by
+   deliberately constructing the failure case rather than assuming it
+   away: a **sign-blind Fisher combined-p meta-analysis** -- an unsound
+   method that never checks whether the two cohorts agree on effect
+   *direction* before combining their p-values -- happens to land on the
+   correct `top_gene` on this locked dataset purely because that gene's
+   two p-values are each individually smaller than the rejected
+   competitor's. With `analysis_strategy` no longer scored, nothing else
+   in the verifier caught that the method itself was unsound; the
+   constructed scenario passed the fully-relaxed verifier at 8/8.
+
+   The fix is a narrower, targeted content check
+   (`test_rationale_addresses_effect_direction`): `rationale` must
+   explicitly state that the rejected competing gene's own effect points
+   the opposite direction between cohorts, not merely cite significance.
+   A genuinely sign-aware analysis has a basis to make that specific
+   claim; a sign-blind one does not, and its honest rationale ("combined
+   p-values without checking sign agreement") describes its *method*
+   without ever asserting the rejected gene is actually opposite-signed --
+   confirmed against the constructed sign-blind scenario, which fails
+   this check (8/9) even though it passes every numeric one. This is a
+   deliberate, documented exception to "rationale is presence-only, never
+   content-graded" (the rest of `rationale` still isn't): it's a
+   substring-matching heuristic over a list of accepted phrasings
+   (`DIRECTION_MISMATCH_PHRASES` in `tests/test_outputs.py`, broadened to
+   ~50 natural phrasings to reduce false-negative risk), not semantic
+   understanding -- it can't verify the reasoning was sound, only that
+   the one load-bearing claim was actually made. Because the exact
+   phrase list isn't agent-visible (`tests/` is excluded from the Docker
+   image, same as the reason `analysis_strategy`'s exact match had to go),
+   `instruction.md` discloses the requirement itself in plain language
+   ("if the rejected candidate's own treatment effect points in a
+   different direction between the two cohorts, the rationale should say
+   so explicitly") without revealing which gene that turns out to be.
 
 ## The prior pilot report
 
@@ -260,24 +311,32 @@ from the project root writes `data_generation/public/*.csv` and
   with the reasoning behind that number in an inline comment. No
   `REPLACE:` placeholders remain in either file.
 - `task-fixer` and `task-review` have been run locally (Docker images
-  build successfully, both well under the size limit). The latest
-  `task-review` run is FAIL, 24/30 PASS, on these open items:
+  build successfully, both well under the size limit). The last full run
+  was FAIL, 24/30 PASS. Since that run, the following of its findings have
+  been addressed in code/docs, but not yet re-verified by an actual fresh
+  `task-review` pass:
   - `well_specified` / `outcome_verified` / `test_instruction_alignment`
-    (three ratings, one underlying concern): the verifier requires
-    `analysis_strategy == strategy_e` specifically, while
-    `instruction.md` presents all five codes as a closed vocabulary to
+    (three ratings, one underlying concern): the verifier previously
+    required `analysis_strategy == strategy_e` specifically while
+    `instruction.md` presented all five codes as a closed vocabulary to
     *describe* whatever approach was used, not as five equally-correct
-    options. Whether this is a genuine contract gap or an intentional
-    "the shape is disclosed, the method is not" design choice (per this
-    repo's own `trajectory-review` philosophy) is an open judgment call,
-    not yet resolved.
+    options -- an undisclosed method requirement layered on an otherwise
+    fully outcome-graded task. Resolved by dropping the exact match (see
+    "Two distinct problems", item 3, above) and replacing it with a
+    narrower, disclosed content check on `rationale`.
   - `difficulty_explanation_quality` / `verification_explanation_quality`:
-    the author's prose does not explicitly state that the data are
-    synthetic/deterministically generated, name the real-world
-    practitioner role, or justify the specific numeric tolerances
+    the author's prose now explicitly states that the data are
+    synthetic/deterministically generated, names the real-world
+    practitioner role, and justifies the specific numeric tolerances
     (`LOG2FC_ABS_TOL=0.2`, `ADJ_P_LOG10_TOL=3.0`, `ADJ_P_MAX_FOR_SIGNIFICANT=5e-4`)
-    against the wrong-scenario margins in the calibration table above.
-    Both are additions to the author's existing text, not rewrites.
+    against the wrong-scenario margins in the calibration table above --
+    see `task.toml`'s `difficulty_explanation` and
+    `verification_explanation`. `verification_explanation` has also been
+    corrected to describe the current `analysis_strategy`/`rationale`
+    grading mechanism accurately rather than the retired exact-match one.
+  - Still genuinely open, deferred to a future round by explicit author
+    decision: the `difficult` rating itself (a round-6 recalibration
+    question, not a contract-gap fix like the two above).
 - Two blind-trial screens (a subagent with no knowledge of this design,
   given only `instruction.md` and the agent-visible files) have been run:
   one after round 4 (passed the science, failed only on since-fixed
