@@ -362,6 +362,35 @@ from the project root writes `data_generation/public/*.csv` and
   leak from the harness's own environment metadata and superseded by the
   three below), and three after round 5 run in fully isolated sessions
   with no repository access at all (see the `difficult` item above for
-  results). Neither this nor the isolated trials are a substitute for the
-  real Harbor campaign and `trajectory-review`, which have not been run
-  yet.
+  results).
+- The real Harbor campaign and `trajectory-review` have now been run
+  (Oracle PASS; 8 real Claude Opus/Codex trials plus 4 Gemini trials that
+  never got past Antigravity CLI authentication). All 8 meaningful trials
+  independently converged on the same alternative answer
+  (`CONSISTENCY_GENE`/`VPS749`), reached via a real, internally consistent
+  methodology: treating "significant" in `strategy_e`'s definition as
+  BH-FDR-adjusted within each cohort, rather than nominal, for the
+  confirmatory-cohort check. `trajectory-review` correctly identified this
+  as a genuine, previously-known-but-unfixed instruction gap (the same
+  nominal-vs-adjusted flip documented above in "Why fixing the alignment
+  is necessary but not sufficient" as a round-4/5-era blind-trial failure
+  mode) rather than a scientific error on the agents' part -- 8/8
+  independent trials landing on the identical alternative interpretation
+  is strong evidence the instruction, not the agents, was underspecified
+  on this one point. Its proposed fix (relax the verifier to accept the
+  BH-FDR pathway as equally valid) was rejected as too broad: that would
+  eliminate the task's actual central judgment call, since the
+  nominal-vs-adjusted choice is precisely what separates `TRUE_GENE` from
+  `CONSISTENCY_GENE`. Instead, `instruction.md` now discloses the rule
+  itself (confirmatory-cohort significance is nominal, not
+  freshly re-corrected across the panel, with the two-stage
+  discovery-then-confirm rationale for why) without naming which gene it
+  points to -- the same "disclose the decision, not the answer" pattern
+  already used for the `analysis_strategy` relaxation and the
+  rationale-direction check.
+- Because this fix changes a load-bearing part of the contract, every
+  prior blind-trial and Harbor-campaign result above (including the
+  4/4/4/4 real-agent run) predates it and should not be read as current
+  difficulty evidence going forward -- fresh trials against the corrected
+  `instruction.md` are needed to reassess whether the task's difficulty
+  holds up once this specific ambiguity is removed.
