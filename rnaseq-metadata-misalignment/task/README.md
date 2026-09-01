@@ -334,13 +334,34 @@ from the project root writes `data_generation/public/*.csv` and
     `verification_explanation`. `verification_explanation` has also been
     corrected to describe the current `analysis_strategy`/`rationale`
     grading mechanism accurately rather than the retired exact-match one.
-  - Still genuinely open, deferred to a future round by explicit author
-    decision: the `difficult` rating itself (a round-6 recalibration
-    question, not a contract-gap fix like the two above).
-- Two blind-trial screens (a subagent with no knowledge of this design,
-  given only `instruction.md` and the agent-visible files) have been run:
-  one after round 4 (passed the science, failed only on since-fixed
-  contract ambiguities) and one after round 5 (failed genuinely, on the
-  tightened `CONSISTENCY_GENE` evidence-strength tradeoff). Neither is a
-  substitute for the real Harbor campaign and `trajectory-review`, which
-  have not been run yet.
+  - `difficult`: resolved with empirical evidence, not by further redesign.
+    Three additional blind trials were run this session in genuinely
+    isolated environments (fresh model instances, no repository or cwd
+    access, data and pipeline code handed over inline rather than mounted)
+    against the locked round-5 dataset. All three correctly diagnosed and
+    fixed both pipeline defects and correctly applied per-cohort
+    independent replication with a same-sign requirement -- the mechanical
+    parts of the task were not the obstacle. All three then nominated the
+    same wrong gene, preferring the candidate with the most uniform effect
+    size across cohorts (`VPS749`) over the candidate with roughly
+    six-fold stronger combined statistical evidence (`CACNA619`); one
+    trial also misidentified `rejected_competing_gene`. Scored against the
+    real verifier: 3/9, 3/9, 4/9. This is a consistent, reproducible
+    failure on the specific judgement the task is designed to test, not an
+    artefact of contract ambiguity or an unlucky sample of one. (This
+    evidence belongs here, not in `task.toml`'s `difficulty_explanation`,
+    which is required to argue intrinsic task difficulty without citing
+    agent trial results -- `task-review`'s `difficulty_explanation_quality`
+    criterion is explicit about this.)
+- Five blind-trial screens total have now been run (a subagent or isolated
+  session with no knowledge of this design, given only `instruction.md`
+  and the agent-visible files): one after round 4 (passed the science,
+  failed only on since-fixed contract ambiguities), one after round 5 run
+  in-repo (failed genuinely, on the tightened `CONSISTENCY_GENE`
+  evidence-strength tradeoff, but later found to risk a cwd/git-branch
+  leak from the harness's own environment metadata and superseded by the
+  three below), and three after round 5 run in fully isolated sessions
+  with no repository access at all (see the `difficult` item above for
+  results). Neither this nor the isolated trials are a substitute for the
+  real Harbor campaign and `trajectory-review`, which have not been run
+  yet.
