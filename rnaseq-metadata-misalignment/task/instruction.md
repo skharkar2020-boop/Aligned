@@ -43,6 +43,8 @@ More than one of these strategies can look like a reasonable choice on its own, 
 
 When checking whether a candidate flagged in one cohort also holds up in the other, use that other cohort's own nominal (uncorrected) p-value for the confirmation test, not a p-value freshly corrected for multiple testing across the whole gene panel again. A candidate already competed against the full panel once, at the cohort where it was first identified; re-applying full-panel correction a second time in the confirming cohort tests it against that same multiple-testing burden twice and penalizes a real, replicating effect for having already cleared it once.
 
+A claimed replicated treatment signal should not hinge on one or two individual samples. Before treating a candidate's apparent replication in a cohort as trustworthy, consider its robustness — how sensitive that result is to influential individual observations — and not only whether it clears a significance threshold when every sample is included.
+
 `log2_fold_change` and `adjusted_p_value` should be the nominated gene's own statistics from whichever single cohort gives it the stronger statistical support — not a pooled or averaged figure. `cohort1_log2_fold_change` and `cohort2_log2_fold_change` are where each cohort's own individual estimate belongs.
 
 Use one of the following values for `heterogeneity_assessment`:

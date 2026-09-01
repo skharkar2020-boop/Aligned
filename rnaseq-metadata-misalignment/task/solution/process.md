@@ -71,13 +71,19 @@ of handling the two cohorts each name a different top gene:
   `analysis_strategy` describes an unprincipled method that got lucky
   here, not a defensible one.
 - **Preferring whichever gene replicates most *consistently*** across
-  cohorts, without also weighing how *strong* that evidence is: promotes a
-  real, moderate, highly-consistent effect over a gene with a stronger
-  overall case (a much stronger cohort1 effect that is real, but weaker
-  and closer to noise, in cohort2). The consistent gene's combined
-  evidence is now only about 6x weaker than the correct answer's (not
-  1000x) -- a real, close call, not an easy miss. Consistency alone is not
-  sufficient when it comes at the cost of materially weaker evidence.
+  cohorts, without also checking whether that apparent replication is
+  *robust*: promotes a gene whose cohort1 and cohort2 fold-changes look
+  almost identical (a striking, reassuring-looking consistency) over a
+  gene with a much stronger overall case but a bigger swing between
+  cohorts (a much stronger cohort1 effect that is real, but weaker and
+  noisier in cohort2). The catch is that the "consistent" gene's cohort2
+  significance is not actually carried by its treated group as a whole --
+  it depends on one or two individual samples. Drop either of them and its
+  cohort2 result is no longer significant, while the correct gene's own
+  (weaker, more heterogeneous) cohort2 evidence survives dropping any
+  single treated sample. Consistency of effect size across cohorts is not
+  the same thing as robustness of the underlying evidence, and only the
+  latter is what a claim of "this replicates" should actually rest on.
 - **Checking nominal significance in both cohorts without checking sign
   agreement**: admits the confounded gene as "replicated" on the strength
   of its now-nominally-significant cohort1 p-value alone, missing that the
@@ -152,30 +158,40 @@ what makes reconciling them a judgment call rather than a lookup.
    requirement (same as the artifact does), but it is not itself evidence
    of a processing problem, and should not be cited as the rejected
    competing gene when a stronger, genuinely-technical candidate exists.
-3. More than one gene can pass the replication bar -- real biological
-   effects are not required to be identical in magnitude across cohorts,
-   and moderate heterogeneity (stronger in one cohort, weaker but real in
-   the other, same direction) is expected, not disqualifying. Up to three
-   candidates can clear it at once: the true gene, a smaller-but-consistent
-   gene, and a gene whose apparent significance is partly inflated by
-   the same latent factor as the technical artifact (its own cohort1
-   effect is real and modest; its cohort2 effect looks more impressive
-   than that alone would justify). Prefer the one with the strongest
-   *combined* evidence (e.g. Fisher's method on the two nominal p-values,
-   now legitimately applicable because direction agreement has already
-   been confirmed) over the one that is merely the most uniform across
-   cohorts, or the one with the single most dramatic cohort2 number. A
-   smaller, very consistent effect is not automatically the safer answer
-   if a materially stronger, still-replicating effect is available; nor is
-   a gene automatically trustworthy just because it technically cleared
-   the same-cohort bar.
-4. Report the surviving gene's own result from whichever cohort gives it
+3. A candidate that passes the same-sign, nominally-significant check in
+   both cohorts still is not automatically trustworthy: check whether that
+   significance is *robust*, not just present. Within the cohort where the
+   candidate's confirming evidence is weakest, drop each treated sample
+   once (leave-one-out) and recompute its p-value against the full control
+   group; the worst (largest) p-value seen across those single-sample
+   drops must still clear the same nominal significance bar used
+   everywhere else. A candidate whose apparent replication only holds
+   because of one or two individual samples is not a real replicated
+   effect, however clean and consistent its headline fold-changes look.
+   One designed gene in this dataset clears ordinary same-sign nominal
+   significance in both cohorts, with a strikingly *consistent* effect
+   size across them, and still fails this check -- its cohort2 result
+   depends on two specific samples and evaporates without them.
+4. More than one gene can pass the replication-plus-robustness bar --
+   real biological effects are not required to be identical in magnitude
+   across cohorts, and moderate heterogeneity (stronger in one cohort,
+   weaker but real in the other, same direction) is expected, not
+   disqualifying. Prefer the one with the strongest *combined* evidence
+   (e.g. Fisher's method on the two nominal p-values, now legitimately
+   applicable because direction agreement has already been confirmed)
+   over the one that is merely the most uniform across cohorts, or the
+   one with the single most dramatic cohort2 number. A smaller, very
+   consistent effect is not automatically the safer answer if a
+   materially stronger, still-replicating effect is available; nor is a
+   gene automatically trustworthy just because it technically cleared the
+   same-cohort bar.
+5. Report the surviving gene's own result from whichever cohort gives it
    the stronger (smaller p-value) evidence, alongside both cohorts'
    individual fold-changes and a categorical description of how they
    relate to each other (consistent, or stronger in one cohort than the
    other), which cohort's own top hit was rejected and why, and the
    verified per-sample ID count.
-5. A prior report exists on disk describing an earlier, much smaller,
+6. A prior report exists on disk describing an earlier, much smaller,
    single-cohort pilot -- deliberately without naming a gene or giving
    numbers specific enough to identify one, so it cannot function as an
    answer shortcut. It is not sufficient evidence on its own; the
@@ -212,11 +228,18 @@ what makes reconciling them a judgment call rather than a lookup.
    evidence is concentrated in one cohort (look for other genes that move
    together with it, confined to that same cohort -- a latent technical
    axis, not biology).
-8. Among genes that do replicate in both cohorts, prefer the one with the
+8. For any candidate that clears step 7, check robustness: within the
+   cohort where its evidence is weakest, drop each treated sample once and
+   recompute the p-value against the full control group. If the worst
+   (largest) p-value seen across those single-sample drops no longer
+   clears the same significance bar the full-sample result did, the
+   apparent replication is not real -- it is being carried by one or two
+   samples, not the treated group as a whole.
+9. Among genes that replicate and are robust, prefer the one with the
    stronger combined evidence over the one that is merely the most
    uniform, unless the "stronger" candidate is actually the rejected
-   artifact from step 7.
-9. Write `result.json` with the surviving gene's symbol, its log2
+   artifact from step 7 or the fragile candidate from step 8.
+10. Write `result.json` with the surviving gene's symbol, its log2
    fold-change and BH-adjusted p-value from its stronger-evidence cohort,
    which analysis strategy was used, both cohorts' own fold-changes for
    that gene, a categorical heterogeneity assessment, the verified sample
@@ -249,16 +272,25 @@ actual numbers:
   it as the strategy used is itself a defensible-sounding but incorrect
   description of how the answer was actually reached.
 - Preferring the most cross-cohort-consistent gene over the one with
-  materially stronger evidence names a real, replicating, but
-  weaker-evidence gene -- wrong on every numeric field, though the margin
-  is now close enough (~6x, not ~1000x) to be a genuine judgment call.
+  materially stronger evidence (and never checking robustness) names a
+  gene that looks genuinely replicating on the surface -- its cohort1 and
+  cohort2 fold-changes are far more consistent than the correct answer's
+  -- but whose cohort2 significance turns out to depend on one or two
+  individual samples rather than the treated group as a whole; wrong on
+  every numeric field.
 - Admitting a candidate as "replicated" on significance alone, without
-  checking that both cohorts agree on effect direction, wrongly accepts
-  the technical artifact.
+  checking that both cohorts agree on effect direction, wrongly folds the
+  technical artifact (and the real-but-sign-reversing heterogeneous gene)
+  into the replicated pool; the correct top gene can still come out right
+  by luck, but `rejected_competing_gene` is wrong because neither
+  reversed-sign gene remains available to report there.
 - Citing the real-but-sign-reversing heterogeneous gene as the rejected
   competitor (rather than the genuine technical artifact) is wrong even
   though excluding it from `top_gene` is correct -- its own single-cohort
   evidence is real but weaker than the actual technical artifact's.
 
 All are visibly different from the locked reference values on at least one
-checked field, and each fails for a different underlying reason.
+checked field, and each fails for a different underlying reason. See
+task/README.md's "Round 6" section for the leave-one-out robustness
+mechanism itself and why it replaced an earlier, less scientifically
+airtight nominal-vs-BH-adjusted trap.

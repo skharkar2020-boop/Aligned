@@ -97,6 +97,16 @@ ADJ_P_LOG10_TOL = 3.0
 # nominally significant (and is wrong-signed) in cohort1.
 NOMINAL_P_THRESHOLD = 0.05
 
+# A gene that clears same-sign + nominal significance in both cohorts can
+# still be a false replication if that significance is carried by one or
+# two outsized samples rather than the treated group as a whole. The
+# robustness check reuses NOMINAL_P_THRESHOLD rather than a second,
+# independently-chosen cutoff: within a cohort's treated group, drop each
+# treated sample once (leave-one-out) and recompute the gene's p-value
+# against the full control group; the worst (largest) p-value seen across
+# those drops must still clear NOMINAL_P_THRESHOLD. See task/README.md for
+# the locked-dataset numbers this separates.
+
 RATIONALE_MIN_LEN = 40
 
 # Closes a specific gap left by dropping the exact analysis_strategy match
@@ -217,6 +227,24 @@ def _differential_expression_for_cohort(
     return _differential_expression(counts, condition).sort_values("adjusted_p_value")
 
 
+def _cohort_treated_worst_case_loo_p(
+    expr: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str
+) -> float:
+    ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
+    condition = metadata.set_index("sample_id").loc[ids, "condition"]
+    control_ids = [sid for sid in ids if condition[sid] == "control"]
+    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
+    log2cpm = _compute_log2_cpm(expr[ids])
+    control_vals = log2cpm.loc[gene, control_ids].to_numpy(dtype=float)
+    worst_p = 0.0
+    for drop in treated_ids:
+        remaining = [sid for sid in treated_ids if sid != drop]
+        treated_vals = log2cpm.loc[gene, remaining].to_numpy(dtype=float)
+        _, p = scipy_stats.ttest_ind(treated_vals, control_vals, equal_var=False)
+        worst_p = max(worst_p, float(p))
+    return worst_p
+
+
 def _fisher_combined_p(p1: float, p2: float) -> float:
     statistic = -2.0 * (np.log(max(p1, 1e-300)) + np.log(max(p2, 1e-300)))
     return float(scipy_stats.chi2.sf(statistic, df=4))
@@ -253,12 +281,18 @@ def _compute_reference() -> dict[str, object]:
 
     candidates = sorted(set(de1.index[:10]) | set(de2.index[:10]))
 
+    def is_robust(gene: str) -> bool:
+        return (
+            _cohort_treated_worst_case_loo_p(expr, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
+            and _cohort_treated_worst_case_loo_p(expr, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
+        )
+
     replicated = []
     for gene in candidates:
         r1, r2 = de1.loc[gene], de2.loc[gene]
         same_sign = np.sign(r1["log2_fold_change"]) == np.sign(r2["log2_fold_change"])
         both_nominal = r1["p_value"] < NOMINAL_P_THRESHOLD and r2["p_value"] < NOMINAL_P_THRESHOLD
-        if same_sign and both_nominal:
+        if same_sign and both_nominal and is_robust(gene):
             combined_p = _fisher_combined_p(float(r1["p_value"]), float(r2["p_value"]))
             replicated.append((gene, combined_p, r1, r2))
 
@@ -274,7 +308,7 @@ def _compute_reference() -> dict[str, object]:
         r1g, r2g = de1.loc[gene], de2.loc[gene]
         same_sign = np.sign(r1g["log2_fold_change"]) == np.sign(r2g["log2_fold_change"])
         both_nominal = r1g["p_value"] < NOMINAL_P_THRESHOLD and r2g["p_value"] < NOMINAL_P_THRESHOLD
-        if same_sign and both_nominal:
+        if same_sign and both_nominal and is_robust(gene):
             continue
         candidate_p = min(float(r1g["p_value"]), float(r2g["p_value"]))
         if best_single_cohort_p is None or candidate_p < best_single_cohort_p:

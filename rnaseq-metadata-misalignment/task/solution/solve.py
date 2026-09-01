@@ -121,6 +121,33 @@ def fisher_combined_p(p1: float, p2: float) -> float:
     return float(scipy_stats.chi2.sf(statistic, df=4))
 
 
+def cohort_treated_worst_case_loo_p(
+    expr: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str
+) -> float:
+    """Robustness check: drop each treated sample in this cohort once, and
+    return the worst (largest) Welch p-value seen. A candidate's cohort-
+    level significance has to survive removing its single most favorable
+    treated sample -- a real, broadly-shared effect should not depend on
+    any one sample; a nominally significant result that isn't robust to
+    that removal isn't the same scientific claim as one that is.
+    """
+    ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
+    condition = metadata.set_index("sample_id").loc[ids, "condition"]
+    control_ids = [sid for sid in ids if condition[sid] == "control"]
+    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
+
+    log2cpm = pipeline_stats.compute_log2_cpm(expr[ids])
+    control_vals = log2cpm.loc[gene, control_ids].to_numpy()
+
+    worst_p = 0.0
+    for drop in treated_ids:
+        remaining = [sid for sid in treated_ids if sid != drop]
+        treated_vals = log2cpm.loc[gene, remaining].to_numpy()
+        _, p = scipy_stats.ttest_ind(treated_vals, control_vals, equal_var=False)
+        worst_p = max(worst_p, float(p))
+    return worst_p
+
+
 def classify_heterogeneity(log2fc_c1: float, log2fc_c2: float) -> str:
     if np.sign(log2fc_c1) != np.sign(log2fc_c2) and log2fc_c1 != 0.0 and log2fc_c2 != 0.0:
         return "opposite_direction_between_cohorts"
@@ -156,12 +183,18 @@ def main() -> None:
     # own analysis (never trust one cohort's ranking alone).
     candidates = sorted(set(de1.index[:10]) | set(de2.index[:10]))
 
+    def is_robust(gene: str) -> bool:
+        return (
+            cohort_treated_worst_case_loo_p(expr, metadata, cohort1, gene) < NOMINAL_P_THRESHOLD
+            and cohort_treated_worst_case_loo_p(expr, metadata, cohort2, gene) < NOMINAL_P_THRESHOLD
+        )
+
     replicated = []
     for gene in candidates:
         r1, r2 = de1.loc[gene], de2.loc[gene]
         same_sign = np.sign(r1["log2_fold_change"]) == np.sign(r2["log2_fold_change"])
         both_nominal = r1["p_value"] < NOMINAL_P_THRESHOLD and r2["p_value"] < NOMINAL_P_THRESHOLD
-        if same_sign and both_nominal:
+        if same_sign and both_nominal and is_robust(gene):
             combined_p = fisher_combined_p(float(r1["p_value"]), float(r2["p_value"]))
             replicated.append((gene, combined_p, r1, r2))
 
@@ -170,12 +203,15 @@ def main() -> None:
     replicated.sort(key=lambda item: item[1])
     top_gene, _, r1, r2 = replicated[0]
 
-    # The rejected competitor: among genes that fail replication, the one
+    # The rejected competitor: among genes that fail replication (including
+    # a same-signed, nominally-significant candidate whose significance
+    # turns out not to be robust to a single influential sample), the one
     # with the single strongest one-cohort result -- the "extremely strong
     # signal driven mainly by one cohort" story that a naive cohort-alone
     # or sign-blind combined analysis would have reported instead.
     rejected_competing_gene = None
     rejected_r1 = rejected_r2 = None
+    rejected_robust = None
     best_single_cohort_p = None
     for gene in candidates:
         if gene == top_gene:
@@ -183,13 +219,14 @@ def main() -> None:
         r1g, r2g = de1.loc[gene], de2.loc[gene]
         same_sign = np.sign(r1g["log2_fold_change"]) == np.sign(r2g["log2_fold_change"])
         both_nominal = r1g["p_value"] < NOMINAL_P_THRESHOLD and r2g["p_value"] < NOMINAL_P_THRESHOLD
-        if same_sign and both_nominal:
+        if same_sign and both_nominal and is_robust(gene):
             continue
         candidate_p = min(float(r1g["p_value"]), float(r2g["p_value"]))
         if best_single_cohort_p is None or candidate_p < best_single_cohort_p:
             best_single_cohort_p = candidate_p
             rejected_competing_gene = str(gene)
             rejected_r1, rejected_r2 = r1g, r2g
+            rejected_robust = same_sign and both_nominal
 
     c1_fc = float(r1["log2_fold_change"])
     c2_fc = float(r2["log2_fold_change"])
@@ -204,6 +241,24 @@ def main() -> None:
             f"({cohort1} log2FC={rejected_c1_fc:.3f} vs. {cohort2} "
             f"log2FC={rejected_c2_fc:.3f}) -- a same-sign check, not "
             f"significance alone, is what actually disqualifies it"
+        )
+    elif rejected_robust:
+        # Passed sign + nominal significance in both cohorts, but its
+        # apparent replication in at least one cohort turns out to hinge on
+        # one or two individual treated samples -- drop the single most
+        # influential one and the effect is no longer significant there.
+        worst_c1 = cohort_treated_worst_case_loo_p(expr, metadata, cohort1, rejected_competing_gene)
+        worst_c2 = cohort_treated_worst_case_loo_p(expr, metadata, cohort2, rejected_competing_gene)
+        fragile_cohort, worst_p = (cohort1, worst_c1) if worst_c1 >= worst_c2 else (cohort2, worst_c2)
+        rejection_detail = (
+            f"its apparent replication in {fragile_cohort} is not robust -- "
+            f"removing the single most influential treated sample there "
+            f"raises the effect's p-value to {worst_p:.3f}, above the "
+            f"nominal-significance bar it otherwise appears to clear "
+            f"({cohort1} log2FC={rejected_c1_fc:.3f}, {cohort2} "
+            f"log2FC={rejected_c2_fc:.3f}), so the claimed cross-cohort "
+            f"signal is really carried by one or two samples rather than "
+            f"the group as a whole"
         )
     else:
         rejection_detail = (

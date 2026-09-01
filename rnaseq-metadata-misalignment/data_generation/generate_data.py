@@ -19,14 +19,26 @@ Ground truth (never exposed via file/column names in the public data):
     condition-aligned shift; in cohort1 (where Z carries no signal) it
     shows nothing. This makes CONFOUND_GENE the single strongest hit in a
     naive pooled or cohort2-only analysis, well above TRUE_GENE.
-  - CONSISTENCY_GENE has a real biological effect, same direction and
-    similar magnitude in both cohorts -- but weaker overall combined
-    evidence than TRUE_GENE (roughly 5-10x weaker by Fisher's method, not
-    orders of magnitude), calibrated as a genuine close call rather than a
-    landslide: a naive "prefer whatever replicates most consistently" rule
-    promotes CONSISTENCY_GENE over TRUE_GENE, when TRUE_GENE's evidence is
-    actually stronger once real, moderate heterogeneity is properly
-    tolerated, but the margin is real, not trivial.
+  - CONSISTENCY_GENE (round 6) is a fragile-replication decoy, not a
+    latent-factor confound: every cohort2-treated sample gets a real,
+    modest effect (log2fc_c2=0.65), but two of the six also get a large
+    additional per-sample boost (+1.8), chosen deterministically and not
+    tied to any public column. This makes its headline cohort2 statistics
+    (log2FC, nominal p, BH-adjusted p, a Mann-Whitney nonparametric check)
+    look as attractive as TRUE_GENE's, or more so, and its cohort1 and
+    cohort2 effects look similarly sized (unlike TRUE_GENE's real
+    heterogeneity) -- an ordinary Welch/BH/effect-size/nonparametric
+    workup plausibly prefers it. But its apparent cohort2 replication is
+    disproportionately carried by those two samples: dropping either one
+    (a standard leave-one-out / influence check) pushes its cohort2
+    p-value from a real hit (~0.04) to clearly non-significant (~0.10),
+    while TRUE_GENE's own (weaker-looking, more heterogeneous) cohort2
+    evidence stays significant under removal of any single treated
+    sample. The scientific claim "this effect independently replicates in
+    cohort2" is true for TRUE_GENE and false for CONSISTENCY_GENE, and
+    that distinction -- not an arbitrary significance-correction
+    convention -- is what a same-sign-and-independently-significant
+    replication check should actually be testing.
   - GHOST_REPLICATOR is a third gene that clears the same nominal-
     significance-in-both-cohorts bar as TRUE_GENE and CONSISTENCY_GENE
     (small real biological effect, same direction both cohorts) but whose
@@ -122,6 +134,31 @@ GENE_PREFIXES = [
 DELTA_Z = 1.2
 Z_SD = 0.3
 
+# Fragile-replication decoy mechanism (round 6, CONSISTENCY_GENE): two of
+# the six cohort2-treated samples get an extra additive log2fc on top of
+# the gene's normal per-sample effect, calibrated (see
+# consistency_gene_influential_samples and cohort_robust_to_loo below) so
+# headline cohort2 statistics look as strong as or stronger than TRUE_GENE's,
+# but a leave-one-out check on the treated group reveals the apparent
+# replication depends disproportionately on those two samples. Not tied to
+# any public column or to the latent factor Z used elsewhere.
+N_INFLUENTIAL_SAMPLES = 2
+INFLUENTIAL_EXTRA_LOG2FC = 1.8
+
+
+def consistency_gene_influential_samples(metadata: pd.DataFrame) -> set[str]:
+    """Deterministically pick which cohort2-treated samples get the extra
+    per-sample boost for CONSISTENCY_GENE. Independent of Z and of any
+    public column -- this is a per-sample expression-level effect, not a
+    labeled subgroup.
+    """
+    treated_ids = metadata.loc[
+        (metadata["cohort"] == "cohort2") & (metadata["condition"] == "treated"), "sample_id"
+    ].tolist()
+    pick_rng = np.random.default_rng(stable_seed("consistency_influential_samples"))
+    chosen = pick_rng.choice(treated_ids, size=N_INFLUENTIAL_SAMPLES, replace=False)
+    return set(chosen)
+
 
 def make_gene_symbols(n: int, rng: np.random.Generator) -> list[str]:
     symbols: list[str] = []
@@ -190,9 +227,9 @@ def latent_z_by_sample(metadata: pd.DataFrame) -> dict[str, float]:
 # fixed panel position, and the actual gene symbol shipped there is
 # whatever make_gene_symbols already generated at that position.
 DESIGNED_GENES = {
-    "TRUE_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.8, "log2fc_c2": 0.8, "z_loading": 0.0},
+    "TRUE_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.8, "log2fc_c2": 0.9, "z_loading": 0.0},
     "CONFOUND_GENE": {"baseline": 400.0, "sigma": 0.25, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 2.5},
-    "CONSISTENCY_GENE": {"baseline": 350.0, "sigma": 0.18, "log2fc_c1": 1.2, "log2fc_c2": 1.2, "z_loading": 0.0},
+    "CONSISTENCY_GENE": {"baseline": 350.0, "sigma": 0.18, "log2fc_c1": 1.2, "log2fc_c2": 0.65, "z_loading": 0.0},
     "GHOST_REPLICATOR": {"baseline": 300.0, "sigma": 0.28, "log2fc_c1": 0.42, "log2fc_c2": 0.42, "z_loading": 0.8},
     "REAL_HETEROGENEITY_GENE": {"baseline": 300.0, "sigma": 0.22, "log2fc_c1": 0.8, "log2fc_c2": -0.8, "z_loading": 0.0},
     "SENTINEL_1": {"baseline": 280.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 0.8},
@@ -223,6 +260,7 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
     condition_by_id = dict(zip(metadata["sample_id"], metadata["condition"]))
     cohort_by_id = dict(zip(metadata["sample_id"], metadata["cohort"]))
     z_by_id = latent_z_by_sample(metadata)
+    influential_ids = consistency_gene_influential_samples(metadata)
 
     n_samples = len(sample_ids)
     size_factor = {
@@ -259,6 +297,8 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
             in_cohort2 = cohort_by_id[sid] == "cohort2"
 
             log2fc = log2fc_c2 if in_cohort2 else log2fc_c1
+            if label == "CONSISTENCY_GENE" and in_cohort2 and is_treated and sid in influential_ids:
+                log2fc = log2fc + INFLUENTIAL_EXTRA_LOG2FC
             effect = (2.0**log2fc) if (is_treated and log2fc != 0.0) else 1.0
 
             z_shift = (2.0 ** (z_loading * z_by_id[sid])) if z_loading != 0.0 else 1.0
@@ -314,6 +354,43 @@ def fisher_combined_p(p1: float, p2: float) -> float:
 NOMINAL_P_THRESHOLD = 0.05
 
 
+def cohort_treated_worst_case_loo_p(
+    counts_df: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str
+) -> float:
+    """Robustness check: within one cohort, drop each treated sample once
+    (leave-one-out), recompute the gene's Welch p-value against the full
+    control group each time, and return the WORST (largest) p-value seen.
+
+    This reuses the same NOMINAL_P_THRESHOLD already used for the ordinary
+    significance check -- a candidate's cohort-level significance has to
+    survive removing its single most favorable treated sample, not clear a
+    second, independently invented cutoff. A real, broadly-shared
+    treatment effect should not depend on any one sample; a candidate
+    whose apparent significance evaporates when its most influential
+    sample is removed is not the same scientific claim as one whose
+    significance is robust to that removal, regardless of how either
+    looks with all samples included.
+    """
+    ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
+    condition = metadata.set_index("sample_id").loc[ids, "condition"]
+    control_ids = [sid for sid in ids if condition[sid] == "control"]
+    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
+
+    counts = counts_df[ids]
+    log2cpm = pipeline_stats.compute_log2_cpm(counts)
+    control_vals = log2cpm.loc[gene, control_ids].to_numpy()
+
+    worst_p = 0.0
+    for drop in treated_ids:
+        remaining = [sid for sid in treated_ids if sid != drop]
+        treated_vals = log2cpm.loc[gene, remaining].to_numpy()
+        from scipy import stats as scipy_stats
+
+        _, p = scipy_stats.ttest_ind(treated_vals, control_vals, equal_var=False)
+        worst_p = max(worst_p, float(p))
+    return worst_p
+
+
 def classify_heterogeneity(log2fc_c1: float, log2fc_c2: float) -> str:
     """Categorical, independently-recomputable heterogeneity label for a
     gene's own pair of per-cohort effect sizes. Same-signed pair: the
@@ -346,11 +423,17 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
        reconciliation strategy that (unlike a formulaic random-effects
        meta-analysis at k=2) does not mechanically punish a gene's own
        legitimate cross-cohort heterogeneity.
-    4. Among genes that clear that bar, prefer the one with the stronger
+    4. That significance must also be ROBUST: it has to survive removing
+       any single treated sample from that cohort (see
+       cohort_treated_worst_case_loo_p), not just hold with all samples
+       included. This is what separates TRUE_GENE (weaker-looking but
+       broadly-supported cohort2 evidence) from CONSISTENCY_GENE (a
+       cohort2 result that looks as strong or stronger, but is carried
+       disproportionately by two samples and evaporates if either is
+       removed) -- round 6's fragile-vs-robust-replication distinction.
+    5. Among genes that clear that bar, prefer the one with the stronger
        combined evidence (Fisher's method on the two independent nominal
-       p-values) -- this is what separates TRUE_GENE (strong in cohort1,
-       real but weaker in cohort2) from CONSISTENCY_GENE (moderate and
-       consistent in both, but with less overall evidence).
+       p-values).
     """
     all_ids = metadata["sample_id"].tolist()
     verified_matching_sample_ids = all(sid in counts_df.columns for sid in all_ids)
@@ -367,7 +450,11 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
         r2 = cohort2_de.loc[gene]
         same_sign = np.sign(r1["log2_fold_change"]) == np.sign(r2["log2_fold_change"])
         both_nominal = r1["p_value"] < NOMINAL_P_THRESHOLD and r2["p_value"] < NOMINAL_P_THRESHOLD
-        if same_sign and both_nominal:
+        if not (same_sign and both_nominal):
+            continue
+        c1_robust = cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
+        c2_robust = cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
+        if c1_robust and c2_robust:
             combined_p = fisher_combined_p(float(r1["p_value"]), float(r2["p_value"]))
             replicated.append((gene, combined_p, r1, r2))
 
@@ -389,7 +476,11 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
         r1g, r2g = cohort1_de.loc[gene], cohort2_de.loc[gene]
         same_sign = np.sign(r1g["log2_fold_change"]) == np.sign(r2g["log2_fold_change"])
         both_nominal = r1g["p_value"] < NOMINAL_P_THRESHOLD and r2g["p_value"] < NOMINAL_P_THRESHOLD
-        if same_sign and both_nominal:
+        both_robust = both_nominal and (
+            cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
+            and cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
+        )
+        if same_sign and both_robust:
             continue
         candidate_p = min(float(r1g["p_value"]), float(r2g["p_value"]))
         if best_single_cohort_p is None or candidate_p < best_single_cohort_p:
