@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -113,8 +114,8 @@ RATIONALE_MIN_LEN = 40
 # (see test_analysis_strategy_matches_recomputation): a sign-blind
 # combined-p method happens to land on the correct top_gene on this locked
 # dataset, and with analysis_strategy no longer scored, nothing else would
-# catch that the method never actually checked effect direction. Requiring
-# one of these phrases in rationale is a heuristic, not semantic
+# catch that the method never actually checked effect direction. Matching
+# one of these patterns in rationale is a heuristic, not semantic
 # understanding -- it can't verify the agent's reasoning was actually
 # sound, only that they asserted the specific claim (the rejected gene's
 # effect points the opposite direction) that a genuinely sign-aware
@@ -123,61 +124,36 @@ RATIONALE_MIN_LEN = 40
 # rationale said "without checking sign agreement" (describing the
 # method) but never claimed the rejected gene was actually opposite-
 # signed, so it fails this check even though it passes every numeric one.
-DIRECTION_MISMATCH_PHRASES = (
-    "opposite direction",
-    "opposite sign",
-    "opposite-signed",
-    "opposite signed",
-    "opposing direction",
-    "opposing sign",
-    "wrong sign",
-    "wrong-signed",
-    "wrong direction",
-    "different sign",
-    "differing sign",
-    "differs in sign",
-    "reversed sign",
-    "reverses sign",
-    "reverse direction",
-    "reverses direction",
-    "sign flip",
-    "flips sign",
-    "flips direction",
-    "not the same direction",
-    "not the same sign",
-    "different direction",
-    "differing direction",
-    "differs in direction",
-    "direction differs",
-    "direction is different",
-    "direction varies",
-    "inconsistent direction",
-    "inconsistent sign",
-    "direction disagrees",
-    "sign disagrees",
-    "disagreement in direction",
-    "disagree in direction",
-    "disagree on direction",
-    "sign disagreement",
-    "direction disagreement",
-    "does not agree in direction",
-    "do not agree in direction",
-    "direction of effect differs",
-    "direction of the effect differs",
-    "positive in one cohort and negative",
-    "negative in one cohort and positive",
-    "increases in one cohort and decreases",
-    "decreases in one cohort and increases",
-    "up in one cohort and down",
-    "down in one cohort and up",
-    "trend in opposite directions",
-    "trends in opposite directions",
-    "trending in opposite directions",
-    "point in different directions",
-    "points in a different direction",
-    "points in the opposite direction",
-    "pointing in different directions",
-    "pointing in opposite directions",
+#
+# A flat literal-substring allowlist was tried first and broadened
+# repeatedly, but a real Harbor campaign still found genuinely correct,
+# clearly-stated rationales it missed purely on wording: "reversed
+# direction" (past tense, vs. the listed "reverses direction"), "positive
+# in cohort2 but negative in cohort1" (named cohorts and "but", vs. the
+# listed "positive in one cohort and negative"), and "opposite treatment
+# effect directions" (extra words breaking the listed "opposite
+# direction" substring). Rather than add three more literal phrases to a
+# list that will keep missing the next paraphrase, this is now a small set
+# of regexes that tolerate the inserted words, cohort names, and
+# connectors ("and"/"but") an agent's own prose actually varies on, while
+# still requiring the same substantive claim (a direction/sign contrast,
+# stated as such, or an explicit positive-in-one/negative-in-the-other
+# claim) -- not a general "did the rationale sound sign-aware" check.
+DIRECTION_MISMATCH_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\b(oppos\w*|revers\w*|different|differ\w*|inconsistent|disagree\w*|flip\w*|varying|varies|discordant)\b[\s\w,'-]{0,40}\b(direction|sign)\w*\b",
+        r"\b(direction|sign)\w*\b[\s\w,'-]{0,40}\b(oppos\w*|revers\w*|different|differ\w*|inconsistent|disagree\w*|flip\w*|varies|discordant)\b",
+        r"\b(does|do|doesn't|don't)\s+not\b[\s\w,'-]{0,15}\bagree\b[\s\w,'-]{0,20}\b(direction|sign)\w*\b",
+        r"\bpositive\b[\s\w,'-]{0,60}\b(and|but)\b[\s\w,'-]{0,25}\bnegative\b",
+        r"\bnegative\b[\s\w,'-]{0,60}\b(and|but)\b[\s\w,'-]{0,25}\bpositive\b",
+        r"\bup\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bdown\b",
+        r"\bdown\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bup\b",
+        r"\bincreases?\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bdecreases?\b",
+        r"\bdecreases?\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bincreases?\b",
+        r"\bwrong\b[\s\w,'-]{0,10}\b(direction|sign)\w*\b",
+        r"\bnot\s+the\s+same\b[\s\w,'-]{0,10}\b(direction|sign)\w*\b",
+    )
 )
 
 
@@ -369,10 +345,10 @@ def test_all_samples_were_id_verified(result: dict[str, object], reference: dict
 
 def test_rationale_addresses_effect_direction(result: dict[str, object], reference: dict[str, object]) -> None:
     rationale_lower = str(result["rationale"]).lower()
-    assert any(phrase in rationale_lower for phrase in DIRECTION_MISMATCH_PHRASES), (
+    assert any(pattern.search(rationale_lower) for pattern in DIRECTION_MISMATCH_PATTERNS), (
         f"rationale does not state that the rejected competing gene's effect points the "
         f"opposite direction between cohorts; a rejection based on significance alone, "
-        f"without checking effect direction, is not sufficient here -- see DIRECTION_MISMATCH_PHRASES "
+        f"without checking effect direction, is not sufficient here -- see DIRECTION_MISMATCH_PATTERNS "
         f"for the accepted phrasing"
     )
 

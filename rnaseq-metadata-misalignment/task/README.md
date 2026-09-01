@@ -405,10 +405,19 @@ from the project root writes `data_generation/public/*.csv` and
   hold up against a real Harbor campaign; the task's scientific-difficulty
   mechanism has since been rebuilt around fragile-vs-robust replication
   instead. A fresh real-agent Harbor trial against the round-6 dataset has
-  not yet been run as of this writing -- doing so, and updating this file
-  and `task.toml`'s `difficulty_explanation` with the result, is the
-  immediate next step before treating round 6 as validated the way rounds
-  4-5 were.
+  now been run (see "Round 6" below) -- zero of 12 trials picked the
+  decoy, confirming the mechanism itself works; two unrelated
+  contract-precision gaps it surfaced have been fixed.
+- The round-6 Harbor campaign (5/12 pass) still leaves the `difficult`
+  criterion's evidence stale: it demonstrates the fragile-vs-robust
+  mechanism isn't currently producing any recorded genuine scientific
+  failures (all 7 recorded failures were contract gaps, now fixed) rather
+  than demonstrating the task is appropriately hard. A follow-up campaign
+  against the current, contract-fixed dataset is needed to see the
+  mechanism's actual genuine-failure rate before `task.toml`'s
+  `difficulty_explanation` can cite empirical trial evidence the way
+  round 5's did (in this file, not in `difficulty_explanation` itself,
+  per that field's own constraint against citing trial pass rates).
 
 ## Round 6: replacing the nominal-vs-BH trap with fragile-vs-robust replication
 
@@ -522,6 +531,61 @@ pooled DE, `cohort2`-alone, sign-blind Fisher, nominal-significance-without-
 sign-check, prefer-most-consistent, `REAL_HETEROGENEITY_GENE`-as-rejected-
 competitor) were re-run against the regenerated dataset and each still fails
 the verifier, for the same reasons as before, at scores ranging 3/9-8/9 (see
-the calibration table). A fresh real-agent Harbor trial against the
-round-6 dataset has not yet been run as of this writing -- see "Open items"
-below.
+the calibration table).
+
+**Fresh real-agent Harbor trial (`hr_CgbuBnIW5sCxKvMyFZHtHA`), and two
+contract-precision fixes it surfaced.** Oracle PASS; 12 real agent trials
+(4 Claude Opus, 4 Codex, 4 Gemini), 5/12 recorded pass, 7/12 fail, 0
+exceptions -- a genuinely mixed, per-model-varying result, unlike round 5's
+uniform 8/8 fail. Critically, **zero of the 12 trials nominated `VPS749`**:
+every trial correctly identified `CACNA619` as `top_gene`. The round-6
+mechanism did what it was built to do; none of the 7 recorded failures were
+about the fragile-vs-robust replication judgment at all. `trajectory-review`
+classified all 7 as non-genuine, for two distinct reasons, both verified
+independently against the actual `DIRECTION_MISMATCH_PATTERNS`/ranking code
+(not taken on the review's word alone) before fixing:
+
+1. **Brittle rationale phrase matching (4 trials).** `DIRECTION_MISMATCH_PHRASES`
+   was a flat literal-substring allowlist, broadened several times across
+   earlier rounds but still missing real paraphrases a correct, sign-aware
+   rationale can use: "reversed direction" (past tense; the list had
+   "reverses direction"), "positive in cohort2 but negative in cohort1"
+   (named cohorts and "but"; the list required the literal substring
+   "positive in one cohort and negative"), and "opposite treatment effect
+   directions" (extra inserted words breaking the literal "opposite
+   direction" substring). Confirmed directly against the list before
+   touching anything: all three independently failed to match. Fixed by
+   replacing the flat list with `DIRECTION_MISMATCH_PATTERNS`, a small set
+   of regexes that tolerate inserted words, named cohorts, and "and"/"but"
+   connectors while still requiring the same substantive claim (a
+   direction/sign contrast, or an explicit positive-in-one/negative-in-the-
+   other statement) -- verified to introduce no regressions against all 54
+   of the previously-accepted literal phrases, to correctly match all four
+   real paraphrases that had just failed, and to still correctly reject the
+   constructed sign-blind-Fisher rationale (which never claims the rejected
+   gene is actually opposite-signed) and a neutral, non-direction-claiming
+   rationale.
+2. **Undisclosed `rejected_competing_gene` tie-break rule (3 trials).**
+   Three trials (2 Claude Opus, 1 Gemini) reported `USP863` instead of
+   `PSMB19` as the rejected competitor, each with a genuinely defensible
+   rationale: `USP863` is independently significant and leave-one-out
+   robust in *both* cohorts with a clean opposite-sign story, which reads
+   as at least as strong a "rejected competitor" case as `PSMB19`'s (which
+   is only barely nominally significant, p=0.040, in its weaker cohort).
+   `instruction.md` said only that `rejected_competing_gene` should be "the
+   strongest alternative considered" without ever stating what "strongest"
+   means when candidates disagree on which axis they're strong on --
+   `PSMB19`'s own single-cohort p-value (4.2e-7) is smaller than `USP863`'s
+   (7.0e-5) by verified computation on the locked dataset, but nothing
+   disclosed that this specific comparison (smallest single-cohort p-value
+   among non-qualifying candidates) is the operative rule, as opposed to
+   overall robustness or corroboration strength. Fixed the same way as the
+   three disclosures before it in this file ("disclose the decision, not
+   the answer"): `instruction.md` now states the tie-break rule explicitly,
+   without naming which gene it favors.
+
+Both fixes were re-verified end to end after applying them: oracle still
+9/9, `validate_scaffold.py` clean, and all seven wrong-scenario walkthroughs
+(the original six plus prefer-most-consistent) still fail the verifier at
+their previous scores -- neither fix loosened anything the walkthroughs
+depend on.
