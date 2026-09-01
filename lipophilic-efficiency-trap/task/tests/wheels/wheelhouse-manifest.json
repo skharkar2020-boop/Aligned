@@ -1,0 +1,65 @@
+{
+  "format": 1,
+  "requirements": [
+    "numpy==2.1.3",
+    "pandas==2.2.3",
+    "pytest==8.4.1",
+    "pytest-json-ctrf==0.3.5"
+  ],
+  "target": {
+    "abi": "cp312",
+    "implementation": "cp",
+    "platform": "manylinux2014_x86_64",
+    "python_version": "3.12"
+  },
+  "wheels": [
+    {
+      "name": "iniconfig-2.3.0-py3-none-any.whl",
+      "sha256": "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"
+    },
+    {
+      "name": "numpy-2.1.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "2312b2aa89e1f43ecea6da6ea9a810d06aae08321609d8dc0d0eda6d946a541b"
+    },
+    {
+      "name": "packaging-26.3-py3-none-any.whl",
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"
+    },
+    {
+      "name": "pandas-2.2.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "fffb8ae78d8af97f849404f21411c95062db1496aeb3e56f146f0355c9989319"
+    },
+    {
+      "name": "pluggy-1.6.0-py3-none-any.whl",
+      "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"
+    },
+    {
+      "name": "pygments-2.21.0-py3-none-any.whl",
+      "sha256": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
+    },
+    {
+      "name": "pytest-8.4.1-py3-none-any.whl",
+      "sha256": "539c70ba6fcead8e78eebbf1115e8b589e7565830d7d006a8723f19ac8a0afb7"
+    },
+    {
+      "name": "pytest_json_ctrf-0.3.5-py3-none-any.whl",
+      "sha256": "e82fd1d69be2f92385bc33540063e5ad7b17b36de67764c84f3ceb9815a895e9"
+    },
+    {
+      "name": "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"
+    },
+    {
+      "name": "pytz-2026.3.post1-py2.py3-none-any.whl",
+      "sha256": "dd95840dd199baea12d9cc096a1d452caa6596a1c1e4b5f3dbd1541855d5e815"
+    },
+    {
+      "name": "six-1.17.0-py2.py3-none-any.whl",
+      "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"
+    },
+    {
+      "name": "tzdata-2026.3-py2.py3-none-any.whl",
+      "sha256": "dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931"
+    }
+  ]
+}
