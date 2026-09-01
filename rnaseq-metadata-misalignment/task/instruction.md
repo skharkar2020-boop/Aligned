@@ -50,4 +50,4 @@ Use one of the following values for `heterogeneity_assessment`:
 * `stronger_in_cohort2_weaker_in_cohort1`
 * `opposite_direction_between_cohorts`
 
-All reported values should be derived from the supplied data and the final analysis. The `rejected_competing_gene` should represent the strongest alternative considered, and the `rationale` should briefly explain why the nominated gene was preferred.
+All reported values should be derived from the supplied data and the final analysis. The `rejected_competing_gene` should represent the strongest alternative considered, and the `rationale` should briefly explain why the nominated gene was preferred. Specifically, if the rejected candidate's own treatment effect points in a different direction between the two cohorts, the rationale should say so explicitly rather than only citing significance — direction and significance are separate properties, and a rejection has to address whichever one actually applies.

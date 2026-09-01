@@ -99,6 +99,77 @@ NOMINAL_P_THRESHOLD = 0.05
 
 RATIONALE_MIN_LEN = 40
 
+# Closes a specific gap left by dropping the exact analysis_strategy match
+# (see test_analysis_strategy_matches_recomputation): a sign-blind
+# combined-p method happens to land on the correct top_gene on this locked
+# dataset, and with analysis_strategy no longer scored, nothing else would
+# catch that the method never actually checked effect direction. Requiring
+# one of these phrases in rationale is a heuristic, not semantic
+# understanding -- it can't verify the agent's reasoning was actually
+# sound, only that they asserted the specific claim (the rejected gene's
+# effect points the opposite direction) that a genuinely sign-aware
+# analysis would make and a sign-blind one has no basis to make. Confirmed
+# against the constructed sign-blind-Fisher scenario during authoring: its
+# rationale said "without checking sign agreement" (describing the
+# method) but never claimed the rejected gene was actually opposite-
+# signed, so it fails this check even though it passes every numeric one.
+DIRECTION_MISMATCH_PHRASES = (
+    "opposite direction",
+    "opposite sign",
+    "opposite-signed",
+    "opposite signed",
+    "opposing direction",
+    "opposing sign",
+    "wrong sign",
+    "wrong-signed",
+    "wrong direction",
+    "different sign",
+    "differing sign",
+    "differs in sign",
+    "reversed sign",
+    "reverses sign",
+    "reverse direction",
+    "reverses direction",
+    "sign flip",
+    "flips sign",
+    "flips direction",
+    "not the same direction",
+    "not the same sign",
+    "different direction",
+    "differing direction",
+    "differs in direction",
+    "direction differs",
+    "direction is different",
+    "direction varies",
+    "inconsistent direction",
+    "inconsistent sign",
+    "direction disagrees",
+    "sign disagrees",
+    "disagreement in direction",
+    "disagree in direction",
+    "disagree on direction",
+    "sign disagreement",
+    "direction disagreement",
+    "does not agree in direction",
+    "do not agree in direction",
+    "direction of effect differs",
+    "direction of the effect differs",
+    "positive in one cohort and negative",
+    "negative in one cohort and positive",
+    "increases in one cohort and decreases",
+    "decreases in one cohort and increases",
+    "up in one cohort and down",
+    "down in one cohort and up",
+    "trend in opposite directions",
+    "trends in opposite directions",
+    "trending in opposite directions",
+    "point in different directions",
+    "points in a different direction",
+    "points in the opposite direction",
+    "pointing in different directions",
+    "pointing in opposite directions",
+)
+
 
 def _compute_log2_cpm(counts: pd.DataFrame) -> pd.DataFrame:
     library_sizes = counts.sum(axis=0)
@@ -250,8 +321,8 @@ def test_result_schema_and_finite_values(result: dict[str, object], reference: d
     )
 
     assert isinstance(result["rationale"], str) and len(result["rationale"].strip()) >= RATIONALE_MIN_LEN, (
-        f"rationale must be a non-trivial explanation (>= {RATIONALE_MIN_LEN} chars); this is a presence check "
-        f"only, never graded on content"
+        f"rationale must be a non-trivial explanation (>= {RATIONALE_MIN_LEN} chars); length is a presence "
+        f"check only -- see test_rationale_addresses_effect_direction for the one content requirement"
     )
 
 
@@ -259,6 +330,16 @@ def test_all_samples_were_id_verified(result: dict[str, object], reference: dict
     assert result["verified_matching_sample_ids"] is True, (
         f"expected all {TOTAL_SAMPLES} samples explicitly ID-verified before analysis, "
         f"got verified_matching_sample_ids={result['verified_matching_sample_ids']!r}"
+    )
+
+
+def test_rationale_addresses_effect_direction(result: dict[str, object], reference: dict[str, object]) -> None:
+    rationale_lower = str(result["rationale"]).lower()
+    assert any(phrase in rationale_lower for phrase in DIRECTION_MISMATCH_PHRASES), (
+        f"rationale does not state that the rejected competing gene's effect points the "
+        f"opposite direction between cohorts; a rejection based on significance alone, "
+        f"without checking effect direction, is not sufficient here -- see DIRECTION_MISMATCH_PHRASES "
+        f"for the accepted phrasing"
     )
 
 
@@ -361,6 +442,7 @@ CHECKS = [
     test_result_schema_and_finite_values,
     test_all_samples_were_id_verified,
     test_top_gene_matches_independent_recomputation,
+    test_rationale_addresses_effect_direction,
     test_cohort_log2_fold_changes_match_recomputation,
     test_heterogeneity_assessment_matches_recomputation,
     test_rejected_competing_gene_matches_recomputation,

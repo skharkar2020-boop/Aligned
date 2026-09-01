@@ -175,6 +175,7 @@ def main() -> None:
     # signal driven mainly by one cohort" story that a naive cohort-alone
     # or sign-blind combined analysis would have reported instead.
     rejected_competing_gene = None
+    rejected_r1 = rejected_r2 = None
     best_single_cohort_p = None
     for gene in candidates:
         if gene == top_gene:
@@ -188,11 +189,28 @@ def main() -> None:
         if best_single_cohort_p is None or candidate_p < best_single_cohort_p:
             best_single_cohort_p = candidate_p
             rejected_competing_gene = str(gene)
+            rejected_r1, rejected_r2 = r1g, r2g
 
     c1_fc = float(r1["log2_fold_change"])
     c2_fc = float(r2["log2_fold_change"])
     home = r1 if float(r1["p_value"]) <= float(r2["p_value"]) else r2
     heterogeneity_assessment = classify_heterogeneity(c1_fc, c2_fc)
+
+    rejected_c1_fc = float(rejected_r1["log2_fold_change"])
+    rejected_c2_fc = float(rejected_r2["log2_fold_change"])
+    if np.sign(rejected_c1_fc) != np.sign(rejected_c2_fc):
+        rejection_detail = (
+            f"its effect points the opposite direction between cohorts "
+            f"({cohort1} log2FC={rejected_c1_fc:.3f} vs. {cohort2} "
+            f"log2FC={rejected_c2_fc:.3f}) -- a same-sign check, not "
+            f"significance alone, is what actually disqualifies it"
+        )
+    else:
+        rejection_detail = (
+            f"its evidence is confined to a single cohort ({cohort1} "
+            f"log2FC={rejected_c1_fc:.3f}, {cohort2} log2FC={rejected_c2_fc:.3f}) "
+            f"and does not clear nominal significance in the other"
+        )
 
     rationale = (
         f"{top_gene} is the only strong candidate that shows a nominally "
@@ -200,17 +218,16 @@ def main() -> None:
         f"(log2FC={c1_fc:.3f}) and {cohort2} (log2FC={c2_fc:.3f}); the "
         f"heterogeneity between cohorts is real but moderate "
         f"({heterogeneity_assessment}), not a sign flip or a null cohort. "
-        f"{rejected_competing_gene} was rejected: its strongest evidence is "
-        f"confined to a single cohort and does not replicate, same-signed, "
-        f"in the other -- naive pooled DE and a sign-blind combined-p "
-        f"meta-analysis are both misled by that gene's outsized single-"
-        f"cohort effect, and cohort2-trusting-alone reports it outright as "
-        f"the top hit. A prior pilot report on file describes an earlier, "
-        f"underpowered, single-cohort finding without giving enough detail "
-        f"to confirm or rule out any specific gene, and predates the "
-        f"confirmatory cohort2 run entirely -- it is not sufficient "
-        f"evidence on its own and does not substitute for this "
-        f"independently recomputed result."
+        f"{rejected_competing_gene} was rejected: {rejection_detail} -- "
+        f"naive pooled DE and a sign-blind combined-p meta-analysis are "
+        f"both misled by that gene's outsized single-cohort effect, and "
+        f"cohort2-trusting-alone reports it outright as the top hit. A "
+        f"prior pilot report on file describes an earlier, underpowered, "
+        f"single-cohort finding without giving enough detail to confirm or "
+        f"rule out any specific gene, and predates the confirmatory "
+        f"cohort2 run entirely -- it is not sufficient evidence on its own "
+        f"and does not substitute for this independently recomputed "
+        f"result."
     )
 
     result = {
