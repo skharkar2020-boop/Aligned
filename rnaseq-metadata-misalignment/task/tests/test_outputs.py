@@ -146,18 +146,27 @@ RATIONALE_MIN_LEN = 40
 # still requiring the same substantive claim (a direction/sign contrast,
 # stated as such, or an explicit positive-in-one/negative-in-the-other
 # claim) -- not a general "did the rationale sound sign-aware" check.
+#
+# Broadened a second time (round 7 trajectory review): "changed direction
+# from negative in cohort1 to positive in cohort2" was missed because
+# "changed" wasn't a recognized trigger word and "from ... to ..." wasn't
+# a recognized connector alongside "and"/"but". Added "chang*" to the
+# trigger-word alternation and "to" to the connector alternation; verified
+# against the full accumulated regression corpus (54 original phrases + 4
+# round-6 gap phrases + this one) with no regressions and no new false
+# positives on the sign-blind/neutral/naive-pooled guard rationales.
 DIRECTION_MISMATCH_PATTERNS = tuple(
     re.compile(pattern)
     for pattern in (
-        r"\b(oppos\w*|revers\w*|different|differ\w*|inconsistent|disagree\w*|flip\w*|varying|varies|discordant)\b[\s\w,'-]{0,40}\b(direction|sign)\w*\b",
-        r"\b(direction|sign)\w*\b[\s\w,'-]{0,40}\b(oppos\w*|revers\w*|different|differ\w*|inconsistent|disagree\w*|flip\w*|varies|discordant)\b",
+        r"\b(oppos\w*|revers\w*|different|differ\w*|inconsistent|disagree\w*|flip\w*|varying|varies|discordant|chang\w*)\b[\s\w,'-]{0,40}\b(direction|sign)\w*\b",
+        r"\b(direction|sign)\w*\b[\s\w,'-]{0,40}\b(oppos\w*|revers\w*|different|differ\w*|inconsistent|disagree\w*|flip\w*|varies|discordant|chang\w*)\b",
         r"\b(does|do|doesn't|don't)\s+not\b[\s\w,'-]{0,15}\bagree\b[\s\w,'-]{0,20}\b(direction|sign)\w*\b",
-        r"\bpositive\b[\s\w,'-]{0,60}\b(and|but)\b[\s\w,'-]{0,25}\bnegative\b",
-        r"\bnegative\b[\s\w,'-]{0,60}\b(and|but)\b[\s\w,'-]{0,25}\bpositive\b",
-        r"\bup\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bdown\b",
-        r"\bdown\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bup\b",
-        r"\bincreases?\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bdecreases?\b",
-        r"\bdecreases?\b[\s\w,'-]{0,40}\b(and|but)\b[\s\w,'-]{0,15}\bincreases?\b",
+        r"\bpositive\b[\s\w,'-]{0,60}\b(and|but|to)\b[\s\w,'-]{0,25}\bnegative\b",
+        r"\bnegative\b[\s\w,'-]{0,60}\b(and|but|to)\b[\s\w,'-]{0,25}\bpositive\b",
+        r"\bup\b[\s\w,'-]{0,40}\b(and|but|to)\b[\s\w,'-]{0,15}\bdown\b",
+        r"\bdown\b[\s\w,'-]{0,40}\b(and|but|to)\b[\s\w,'-]{0,15}\bup\b",
+        r"\bincreases?\b[\s\w,'-]{0,40}\b(and|but|to)\b[\s\w,'-]{0,15}\bdecreases?\b",
+        r"\bdecreases?\b[\s\w,'-]{0,40}\b(and|but|to)\b[\s\w,'-]{0,15}\bincreases?\b",
         r"\bwrong\b[\s\w,'-]{0,10}\b(direction|sign)\w*\b",
         r"\bnot\s+the\s+same\b[\s\w,'-]{0,10}\b(direction|sign)\w*\b",
     )
