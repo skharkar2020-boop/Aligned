@@ -1,7 +1,7 @@
 # Kinase X hit-to-lead: nominate the compound to progress
 
 A hit-to-lead chemistry campaign against "Kinase X" has produced a series of
-28 analogs (`C001`-`C028`) from a single scaffold. Each analog has been
+30 analogs from a single scaffold. Each analog has been
 profiled in vitro against the primary target and a structurally related
 off-target kinase paralog ("Kinase X-related", a selectivity liability if
 bound), plus a standard panel of physicochemical and ADME properties. The
@@ -34,7 +34,7 @@ Both files share `compound_id` as the join key.
 
 ## Deliverable 1: `/workspace/output/compound_metrics.csv`
 
-One row per compound — 28 rows total, each `compound_id` present exactly
+One row per compound — 30 rows total, each `compound_id` present exactly
 once. Columns:
 
 - `compound_id`
@@ -55,7 +55,7 @@ once. Columns:
 A JSON object with the following fields:
 
 - `naive_top_potency_id`: the `compound_id` with the single highest
-  `pic50_target` across all 28 compounds.
+  `pic50_target` across all 30 compounds.
 - `n_developability_pass`: the count of compounds with
   `developability_pass == true`.
 - `nominated_lead_id`: the `compound_id` a hit-to-lead chemistry team should

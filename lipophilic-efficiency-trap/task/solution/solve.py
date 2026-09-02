@@ -9,11 +9,17 @@ Conventions (must match instruction.md and the verifier exactly):
     (assay QC artifacts) are excluded entirely.
   - developability_pass requires solubility_um >= 20 AND clint_ul_min_mg <=
     45 AND papp_1e6cm_s >= 8 (all three).
-  - nominated_lead_id is not a disclosed formula: the reference solution
-    additionally requires selectivity_index >= 0.6 among developability_pass
-    compounds, then nominates the highest-lle compound in that set. Neither
-    this threshold nor the gate-then-argmax procedure appears in
-    instruction.md or in any result.json field -- see solution/process.md.
+  - nominated_lead_id is not a disclosed formula. The reference solution
+    requires developability_pass AND selectivity_index > 0 (i.e. genuinely
+    more potent against the primary target than the off-target paralog --
+    a natural zero-point, not a tuned magic number), then nominates the
+    highest-lle compound among what remains. Neither this rule nor the
+    threshold appears in instruction.md or in any result.json field --
+    see solution/process.md. Applying only the disclosed developability
+    threshold and sorting by lle is NOT sufficient to recover the correct
+    answer: it selects a different compound with excellent lle but clearly
+    negative selectivity_index (more potent against the paralog than the
+    target) -- see process.md's mechanical-shortcut validation.
 """
 from __future__ import annotations
 
@@ -28,7 +34,7 @@ WORKSPACE_DIR = Path(os.environ.get("WORKSPACE_DIR", "/workspace"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(WORKSPACE_DIR / "data")))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKSPACE_DIR / "output")))
 
-SELECTIVITY_THRESHOLD = 0.6
+SELECTIVITY_THRESHOLD = 0.0
 SOLUBILITY_MIN = 20.0
 CLINT_MAX = 45.0
 PAPP_MIN = 8.0
@@ -76,7 +82,7 @@ def main() -> None:
     ).iloc[0]["compound_id"]
 
     gate = compound_metrics[
-        compound_metrics["developability_pass"] & (compound_metrics["selectivity_index"] >= SELECTIVITY_THRESHOLD)
+        compound_metrics["developability_pass"] & (compound_metrics["selectivity_index"] > SELECTIVITY_THRESHOLD)
     ]
     gate_sorted = gate.sort_values(["lle", "compound_id"], ascending=[False, True])
     nominated_lead_id = gate_sorted.iloc[0]["compound_id"]

@@ -20,7 +20,7 @@ OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", str(WORKSPACE_DIR / "output")))
 TESTS_DIR = Path(os.environ.get("TESTS_DIR", str(Path(__file__).parent)))
 DATA_DIR = TESTS_DIR / "data"
 
-SELECTIVITY_THRESHOLD = 0.6
+SELECTIVITY_THRESHOLD = 0.0
 SOLUBILITY_MIN = 20.0
 CLINT_MAX = 45.0
 PAPP_MIN = 8.0
@@ -69,7 +69,7 @@ def _independent_recomputation() -> tuple[pd.DataFrame, dict]:
     naive_top_potency_id = merged.sort_values(
         ["pic50_target", "compound_id"], ascending=[False, True]
     ).iloc[0]["compound_id"]
-    gate = merged[merged["developability_pass"] & (merged["selectivity_index"] >= SELECTIVITY_THRESHOLD)]
+    gate = merged[merged["developability_pass"] & (merged["selectivity_index"] > SELECTIVITY_THRESHOLD)]
     gate_sorted = gate.sort_values(["lle", "compound_id"], ascending=[False, True])
     nominated_lead_id = gate_sorted.iloc[0]["compound_id"]
 
@@ -106,7 +106,7 @@ def test_compound_metrics_schema_and_completeness(submitted_compound_metrics, ex
     assert set(EXPECTED_COMPOUND_METRICS_COLUMNS).issubset(set(df.columns)), (
         f"missing columns: {set(EXPECTED_COMPOUND_METRICS_COLUMNS) - set(df.columns)}"
     )
-    assert len(df) == len(exp_df) == 28, f"expected 28 rows, got {len(df)}"
+    assert len(df) == len(exp_df) == 30, f"expected 30 rows, got {len(df)}"
     assert set(df["compound_id"]) == set(exp_df["compound_id"]), "compound_id set mismatch"
     assert df["compound_id"].is_unique, "duplicate compound_id rows"
 
@@ -139,7 +139,7 @@ def test_result_schema_and_finite_values(submitted_result):
     assert isinstance(result["n_developability_pass"], int), (
         f"n_developability_pass must be an int, got {type(result['n_developability_pass'])}"
     )
-    assert 0 <= result["n_developability_pass"] <= 28, (
+    assert 0 <= result["n_developability_pass"] <= 30, (
         f"n_developability_pass out of range: {result['n_developability_pass']}"
     )
     for key in ["naive_top_potency_id", "nominated_lead_id"]:
