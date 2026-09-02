@@ -148,6 +148,78 @@ def cohort_treated_worst_case_loo_p(
     return worst_p
 
 
+def fit_ebayes_prior(pooled_vars: np.ndarray, df_g: float) -> tuple[float, float]:
+    """Method-of-moments fit of the empirical-Bayes prior degrees of
+    freedom (d0) and prior variance (s0^2) -- the same closed-form
+    moderated-variance estimator behind limma's eBayes (Smyth 2004), with
+    no hand-picked prior weight: both parameters are estimated from how
+    much this dataset's own per-gene variances actually vary across the
+    panel. A candidate's own small-sample variance estimate (5 residual
+    degrees of freedom per cohort here) is itself a noisy quantity; this
+    shrinks each gene's variance toward the panel's typical value, weighted
+    by how much confidence the data itself supports placing in that typical
+    value versus the gene's own noisy estimate.
+    """
+    from scipy import special, optimize
+
+    pooled_vars = np.asarray(pooled_vars, dtype=float)
+    pooled_vars = pooled_vars[pooled_vars > 0]
+    z = np.log(pooled_vars)
+    e = z - (special.digamma(df_g / 2.0) - np.log(df_g / 2.0))
+    mean_e = float(e.mean())
+    var_e = float(e.var(ddof=1))
+    target = var_e - float(special.polygamma(1, df_g / 2.0))
+
+    if target <= 0:
+        return float("inf"), float(np.exp(mean_e))
+
+    def f(x: float) -> float:
+        return float(special.polygamma(1, x)) - target
+
+    x = optimize.brentq(f, 1e-6, 1e6, xtol=1e-10)
+    d0 = 2.0 * x
+    s0_sq = float(np.exp(mean_e + special.digamma(d0 / 2.0) - np.log(d0 / 2.0)))
+    return d0, s0_sq
+
+
+def cohort_moderated_p_value(expr: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str) -> float:
+    """Moderated (empirical-Bayes shrunk-variance) p-value for one gene
+    within one cohort. The prior is fit once per cohort from every gene's
+    own pooled within-group variance there (fit_ebayes_prior) -- self-
+    calibrating to the supplied data, not to a fixed constant.
+    """
+    ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
+    condition = metadata.set_index("sample_id").loc[ids, "condition"]
+    control_ids = [sid for sid in ids if condition[sid] == "control"]
+    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
+    n1, n2 = len(control_ids), len(treated_ids)
+    df_g = n1 + n2 - 2
+
+    log2cpm = pipeline_stats.compute_log2_cpm(expr[ids])
+    var_c = log2cpm[control_ids].var(axis=1, ddof=1)
+    var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
+    pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
+
+    d0, s0_sq = fit_ebayes_prior(pooled_var.to_numpy(), df_g)
+    if np.isinf(d0):
+        mod_var = s0_sq
+        mod_df = 1e6
+    else:
+        mod_var = (d0 * s0_sq + df_g * float(pooled_var[gene])) / (d0 + df_g)
+        mod_df = d0 + df_g
+
+    mean_diff = float(log2cpm.loc[gene, treated_ids].mean() - log2cpm.loc[gene, control_ids].mean())
+    se = float(np.sqrt(mod_var * (1.0 / n1 + 1.0 / n2)))
+    t_mod = mean_diff / se
+    return float(2.0 * scipy_stats.t.sf(abs(t_mod), df=mod_df))
+
+
+def moderated_combined_p(expr: pd.DataFrame, metadata: pd.DataFrame, cohort1: str, cohort2: str, gene: str) -> float:
+    p1 = cohort_moderated_p_value(expr, metadata, cohort1, gene)
+    p2 = cohort_moderated_p_value(expr, metadata, cohort2, gene)
+    return fisher_combined_p(p1, p2)
+
+
 def classify_heterogeneity(log2fc_c1: float, log2fc_c2: float) -> str:
     if np.sign(log2fc_c1) != np.sign(log2fc_c2) and log2fc_c1 != 0.0 and log2fc_c2 != 0.0:
         return "opposite_direction_between_cohorts"
@@ -195,7 +267,12 @@ def main() -> None:
         same_sign = np.sign(r1["log2_fold_change"]) == np.sign(r2["log2_fold_change"])
         both_nominal = r1["p_value"] < NOMINAL_P_THRESHOLD and r2["p_value"] < NOMINAL_P_THRESHOLD
         if same_sign and both_nominal and is_robust(gene):
-            combined_p = fisher_combined_p(float(r1["p_value"]), float(r2["p_value"]))
+            # Tiebreak among replicated candidates uses MODERATED combined
+            # evidence, not raw -- a candidate can look stronger on raw
+            # evidence purely because its own small-sample variance
+            # estimate happened, by chance, to come out unusually small in
+            # one cohort (round 7).
+            combined_p = moderated_combined_p(expr, metadata, cohort1, cohort2, gene)
             replicated.append((gene, combined_p, r1, r2))
 
     if not replicated:

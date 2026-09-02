@@ -4,11 +4,48 @@ Ground truth (never exposed via file/column names in the public data):
   - 24 samples across two independent cohorts, cohort1 (sample_1..sample_12)
     and cohort2 (sample_13..sample_24), each 6 vehicle-control / 6
     compound-treated. cohort2 is a later, independent confirmatory run.
-  - TRUE_GENE has a real condition effect present in BOTH cohorts, same
+  - TRUE_GENE is the strongest generalizable treatment-associated
+    candidate in this panel -- not "the only gene with a real effect" (RNA-
+    seq treatment responses are rarely that clean), but the one whose
+    cross-cohort evidence remains credible once small-sample variance
+    uncertainty is properly accounted for (see VARIANCE_DECOY_GENE below).
+    It has a real condition effect present in BOTH cohorts, same
     direction, but with real biological heterogeneity: strong in cohort1,
     weaker (but still real, still same-signed) in cohort2. Neither cohort
     can be discarded wholesale -- this is legitimate effect-size
-    heterogeneity, not "null in one cohort."
+    heterogeneity, not "null in one cohort." As of round 7 its own headline
+    effect is deliberately modest (log2fc_c1=1.3, not a landslide winner
+    against VARIANCE_DECOY_GENE on raw/unmoderated evidence).
+  - VARIANCE_DECOY_GENE (round 7) is mechanically an entirely ordinary
+    gene: the same generative model as TRUE_GENE (baseline=500,
+    sigma=0.25, a real, uniform condition effect in both cohorts, no
+    influential-sample trick, no latent-factor loading). It differs from
+    TRUE_GENE only in which natural noise draw it happens to land on
+    (panel position 83, chosen by searching many candidate positions for
+    one where this was true, not by manufacturing any sample's value): by
+    chance, its cohort2 within-group sample variance came out
+    anomalously small (~0.03 vs. an assigned/expected ~0.06), which
+    inflates its apparent significance there under a plain per-gene
+    Welch test -- with only 6 samples per group, a single gene's own
+    variance estimate is itself a noisy quantity (5 residual degrees of
+    freedom), and this is a real instance of that noise working in the
+    decoy's favor. Under ordinary Welch/BH/leave-one-out/Mann-Whitney
+    analysis, VARIANCE_DECOY_GENE beats TRUE_GENE on nearly every axis:
+    stronger raw combined evidence, BH-significant in both cohorts
+    (TRUE_GENE is BH-significant only in cohort1), and a more consistent
+    effect size across cohorts. Recovering TRUE_GENE requires recognizing
+    that this apparent strength is not robust to standard small-sample
+    variance moderation: empirical-Bayes-shrunk variance (see
+    fit_ebayes_prior/cohort_moderated_p_value below -- a faithful,
+    self-calibrating reimplementation of the same moment-based estimator
+    behind limma's eBayes, with no hand-picked prior weight) pulls the
+    decoy's anomalously small cohort2 variance back toward the panel's
+    typical value, which is enough to flip the cross-cohort combined-
+    evidence ranking in TRUE_GENE's favor. Verified independently against
+    real limma-voom, edgeR's quasi-likelihood pipeline, and DESeq2 on this
+    exact locked dataset (see task/README.md): all three, each estimating
+    their own moderation strength from the data rather than from any
+    generator-known parameter, agree with this conclusion.
   - CONFOUND_GENE has no true biological condition effect in either cohort.
     It carries a real, deliberate *latent* technical artifact confined to
     cohort2: a continuous per-sample latent factor Z (never written to any
@@ -227,11 +264,12 @@ def latent_z_by_sample(metadata: pd.DataFrame) -> dict[str, float]:
 # fixed panel position, and the actual gene symbol shipped there is
 # whatever make_gene_symbols already generated at that position.
 DESIGNED_GENES = {
-    "TRUE_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.8, "log2fc_c2": 0.9, "z_loading": 0.0},
+    "TRUE_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.3, "log2fc_c2": 0.9, "z_loading": 0.0},
     "CONFOUND_GENE": {"baseline": 400.0, "sigma": 0.25, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 2.5},
     "CONSISTENCY_GENE": {"baseline": 350.0, "sigma": 0.18, "log2fc_c1": 1.2, "log2fc_c2": 0.65, "z_loading": 0.0},
     "GHOST_REPLICATOR": {"baseline": 300.0, "sigma": 0.28, "log2fc_c1": 0.42, "log2fc_c2": 0.42, "z_loading": 0.8},
     "REAL_HETEROGENEITY_GENE": {"baseline": 300.0, "sigma": 0.22, "log2fc_c1": 0.8, "log2fc_c2": -0.8, "z_loading": 0.0},
+    "VARIANCE_DECOY_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.0, "log2fc_c2": 0.9, "z_loading": 0.0},
     "SENTINEL_1": {"baseline": 280.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 0.8},
     "SENTINEL_2": {"baseline": 260.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": -0.6},
     "SENTINEL_3": {"baseline": 300.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 1.0},
@@ -246,6 +284,7 @@ DESIGNED_POSITIONS = {
     "CONSISTENCY_GENE": 203,
     "GHOST_REPLICATOR": 33,
     "REAL_HETEROGENEITY_GENE": 260,
+    "VARIANCE_DECOY_GENE": 83,
     "SENTINEL_1": 15,
     "SENTINEL_2": 249,
     "SENTINEL_3": 61,
@@ -391,6 +430,87 @@ def cohort_treated_worst_case_loo_p(
     return worst_p
 
 
+def fit_ebayes_prior(pooled_vars: np.ndarray, df_g: float) -> tuple[float, float]:
+    """Method-of-moments fit of the empirical-Bayes prior degrees of
+    freedom (d0) and prior variance (s0^2) for the moderated-variance model
+    behind limma's eBayes and (in substance) DESeq2's/edgeR's own
+    dispersion-shrinkage machinery (Smyth 2004): each gene's own variance
+    estimate is treated as a noisy draw around a shared, panel-wide typical
+    variance, and the strength of that shrinkage is itself estimated from
+    how much the per-gene variances actually vary across the panel -- not a
+    fixed, hand-chosen constant. This is the same closed-form moment
+    estimator limma::fitFDist implements; verified independently against
+    real limma-voom, edgeR's quasi-likelihood pipeline, and DESeq2 on this
+    exact dataset (see task/README.md) -- all three, each estimating their
+    own moderation strength from the data, agree with this estimator's
+    conclusion.
+    """
+    from scipy import special, optimize
+
+    pooled_vars = np.asarray(pooled_vars, dtype=float)
+    pooled_vars = pooled_vars[pooled_vars > 0]
+    z = np.log(pooled_vars)
+    e = z - (special.digamma(df_g / 2.0) - np.log(df_g / 2.0))
+    mean_e = float(e.mean())
+    var_e = float(e.var(ddof=1))
+    target = var_e - float(special.polygamma(1, df_g / 2.0))
+
+    if target <= 0:
+        return float("inf"), float(np.exp(mean_e))
+
+    def f(x: float) -> float:
+        return float(special.polygamma(1, x)) - target
+
+    x = optimize.brentq(f, 1e-6, 1e6, xtol=1e-10)
+    d0 = 2.0 * x
+    s0_sq = float(np.exp(mean_e + special.digamma(d0 / 2.0) - np.log(d0 / 2.0)))
+    return d0, s0_sq
+
+
+def cohort_moderated_p_value(
+    counts_df: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str
+) -> float:
+    """Moderated (empirical-Bayes shrunk-variance) Welch-style p-value for
+    one gene within one cohort. The prior (d0, s0^2) is fit once per cohort
+    from every gene's own pooled within-group variance in that cohort (see
+    fit_ebayes_prior) -- self-calibrating to this dataset, not to any
+    hand-picked constant or to knowledge of which gene is being evaluated.
+    """
+    from scipy import stats as scipy_stats
+
+    ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
+    condition = metadata.set_index("sample_id").loc[ids, "condition"]
+    control_ids = [sid for sid in ids if condition[sid] == "control"]
+    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
+    n1, n2 = len(control_ids), len(treated_ids)
+    df_g = n1 + n2 - 2
+
+    log2cpm = pipeline_stats.compute_log2_cpm(counts_df[ids])
+    var_c = log2cpm[control_ids].var(axis=1, ddof=1)
+    var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
+    pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
+
+    d0, s0_sq = fit_ebayes_prior(pooled_var.to_numpy(), df_g)
+    if np.isinf(d0):
+        mod_var = s0_sq
+        mod_df = 1e6
+    else:
+        mod_var = (d0 * s0_sq + df_g * float(pooled_var[gene])) / (d0 + df_g)
+        mod_df = d0 + df_g
+
+    mean_diff = float(log2cpm.loc[gene, treated_ids].mean() - log2cpm.loc[gene, control_ids].mean())
+    se = float(np.sqrt(mod_var * (1.0 / n1 + 1.0 / n2)))
+    t_mod = mean_diff / se
+    return float(2.0 * scipy_stats.t.sf(abs(t_mod), df=mod_df))
+
+
+def moderated_combined_p(counts_df: pd.DataFrame, metadata: pd.DataFrame, gene: str) -> float:
+    """Fisher-combine the two cohorts' moderated p-values for one gene."""
+    p1 = cohort_moderated_p_value(counts_df, metadata, "cohort1", gene)
+    p2 = cohort_moderated_p_value(counts_df, metadata, "cohort2", gene)
+    return fisher_combined_p(p1, p2)
+
+
 def classify_heterogeneity(log2fc_c1: float, log2fc_c2: float) -> str:
     """Categorical, independently-recomputable heterogeneity label for a
     gene's own pair of per-cohort effect sizes. Same-signed pair: the
@@ -432,8 +552,15 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
        disproportionately by two samples and evaporates if either is
        removed) -- round 6's fragile-vs-robust-replication distinction.
     5. Among genes that clear that bar, prefer the one with the stronger
-       combined evidence (Fisher's method on the two independent nominal
-       p-values).
+       combined evidence -- but "stronger" is evaluated on MODERATED
+       per-cohort p-values (empirical-Bayes shrunk variance, prior
+       strength self-estimated from this dataset's own per-gene variances,
+       see cohort_moderated_p_value/fit_ebayes_prior), not raw/unmoderated
+       ones. Round 7's distinction: a candidate can look stronger on raw
+       evidence purely because its own small-sample variance estimate
+       happened, by chance, to come out unusually (and unreliably) small
+       in one cohort; moderated variance corrects for that before the
+       final combined-evidence comparison is made.
     """
     all_ids = metadata["sample_id"].tolist()
     verified_matching_sample_ids = all(sid in counts_df.columns for sid in all_ids)
@@ -455,7 +582,7 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
         c1_robust = cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
         c2_robust = cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
         if c1_robust and c2_robust:
-            combined_p = fisher_combined_p(float(r1["p_value"]), float(r2["p_value"]))
+            combined_p = moderated_combined_p(counts_df, metadata, gene)
             replicated.append((gene, combined_p, r1, r2))
 
     assert replicated, "expected at least one gene to pass the independent-replication gate"

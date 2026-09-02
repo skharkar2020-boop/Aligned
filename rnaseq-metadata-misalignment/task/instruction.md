@@ -45,6 +45,8 @@ When checking whether a candidate flagged in one cohort also holds up in the oth
 
 A claimed replicated treatment signal should not hinge on one or two individual samples. Before treating a candidate's apparent replication in a cohort as trustworthy, consider its robustness — how sensitive that result is to influential individual observations — and not only whether it clears a significance threshold when every sample is included.
 
+With only six samples per condition in each cohort, a gene's own variance estimate is itself an uncertain quantity, and two candidates with genuinely similar underlying variability can still show noticeably different p-values purely from that small-sample noise. When ranking candidates that have already cleared the checks above, consider the stability of each candidate's own variance estimate rather than ranking by unmoderated significance alone — an approach that accounts for this is standard practice for small-replicate genomic studies.
+
 `log2_fold_change` and `adjusted_p_value` should be the nominated gene's own statistics from whichever single cohort gives it the stronger statistical support — not a pooled or averaged figure. `cohort1_log2_fold_change` and `cohort2_log2_fold_change` are where each cohort's own individual estimate belongs.
 
 Use one of the following values for `heterogeneity_assessment`:

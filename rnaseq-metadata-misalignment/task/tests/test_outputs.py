@@ -75,19 +75,26 @@ VALID_HETEROGENEITY_LABELS = {
 # log2 fold-change is a plain difference of group means in log2(CPM+1)
 # space within one cohort, so it is essentially method-invariant (Welch vs.
 # Student t, or a different multiple-testing correction, do not move it).
-# Naive pooling of both cohorts moves the true top gene's own fold-change
-# by >0.8 in the locked dataset (2.13 home-cohort vs. 1.32 pooled); every
-# other wrong scenario checked during authoring names a different gene
-# entirely. This tolerance stays generous to method choice while still
-# separating a real fix from a contaminated pooled estimate.
+# Naive pooling of both cohorts moves the top candidate's own fold-change
+# by ~0.5 in the locked dataset (1.62 home-cohort vs. 1.11 pooled), outside
+# this tolerance -- though naive pooling is already caught by top_gene not
+# matching at all (it promotes the round-7 variance-fragile decoy, whose
+# own apparent strength does not survive moderated-variance re-evaluation);
+# every other wrong scenario checked during authoring names a different
+# gene entirely too. This tolerance stays generous to method choice while
+# still separating a real fix from a contaminated estimate.
 LOG2FC_ABS_TOL = 0.2
 
 # adjusted_p_value is sensitive to the exact test/correction choice, so we
 # only require it land clearly in significant territory and be within a
-# wide log-scale band of the reference value (~5.7e-05 in the locked
-# dataset). Naive pooling lands at adjusted p~1.1e-02 for the same gene,
-# comfortably outside ADJ_P_MAX_FOR_SIGNIFICANT.
-ADJ_P_MAX_FOR_SIGNIFICANT = 5e-4
+# wide log-scale band of the reference value (~7.2e-04 in the locked
+# dataset -- the strongest generalizable candidate's own headline effect is
+# deliberately modest as of round 7, not a landslide against the decoy on
+# raw/unmoderated evidence). Naive pooling's own adjusted p-value for that
+# candidate (~3.6e-4) does not by itself clear this ceiling either way --
+# that scenario is caught by top_gene mismatch instead (see LOG2FC_ABS_TOL
+# above), not by this ceiling.
+ADJ_P_MAX_FOR_SIGNIFICANT = 2e-3
 ADJ_P_LOG10_TOL = 3.0
 
 # A candidate gene "replicates" in the other cohort if it clears plain
@@ -221,6 +228,73 @@ def _cohort_treated_worst_case_loo_p(
     return worst_p
 
 
+def _fit_ebayes_prior(pooled_vars: np.ndarray, df_g: float) -> tuple[float, float]:
+    """Method-of-moments fit of the empirical-Bayes prior degrees of
+    freedom (d0) and prior variance (s0^2) -- the same closed-form
+    moderated-variance estimator behind limma's eBayes (Smyth 2004), with
+    no hand-picked prior weight: both parameters are estimated from how
+    much this dataset's own per-gene variances actually vary across the
+    panel.
+    """
+    from scipy import special, optimize
+
+    pooled_vars = np.asarray(pooled_vars, dtype=float)
+    pooled_vars = pooled_vars[pooled_vars > 0]
+    z = np.log(pooled_vars)
+    e = z - (special.digamma(df_g / 2.0) - np.log(df_g / 2.0))
+    mean_e = float(e.mean())
+    var_e = float(e.var(ddof=1))
+    target = var_e - float(special.polygamma(1, df_g / 2.0))
+
+    if target <= 0:
+        return float("inf"), float(np.exp(mean_e))
+
+    def f(x: float) -> float:
+        return float(special.polygamma(1, x)) - target
+
+    x = optimize.brentq(f, 1e-6, 1e6, xtol=1e-10)
+    d0 = 2.0 * x
+    s0_sq = float(np.exp(mean_e + special.digamma(d0 / 2.0) - np.log(d0 / 2.0)))
+    return d0, s0_sq
+
+
+def _cohort_moderated_p_value(expr: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str) -> float:
+    """Moderated (empirical-Bayes shrunk-variance) p-value for one gene
+    within one cohort, self-calibrating to the supplied dataset (see
+    _fit_ebayes_prior).
+    """
+    ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
+    condition = metadata.set_index("sample_id").loc[ids, "condition"]
+    control_ids = [sid for sid in ids if condition[sid] == "control"]
+    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
+    n1, n2 = len(control_ids), len(treated_ids)
+    df_g = n1 + n2 - 2
+
+    log2cpm = _compute_log2_cpm(expr[ids])
+    var_c = log2cpm[control_ids].var(axis=1, ddof=1)
+    var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
+    pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
+
+    d0, s0_sq = _fit_ebayes_prior(pooled_var.to_numpy(), df_g)
+    if np.isinf(d0):
+        mod_var = s0_sq
+        mod_df = 1e6
+    else:
+        mod_var = (d0 * s0_sq + df_g * float(pooled_var[gene])) / (d0 + df_g)
+        mod_df = d0 + df_g
+
+    mean_diff = float(log2cpm.loc[gene, treated_ids].mean() - log2cpm.loc[gene, control_ids].mean())
+    se = float(np.sqrt(mod_var * (1.0 / n1 + 1.0 / n2)))
+    t_mod = mean_diff / se
+    return float(2.0 * scipy_stats.t.sf(abs(t_mod), df=mod_df))
+
+
+def _moderated_combined_p(expr: pd.DataFrame, metadata: pd.DataFrame, gene: str) -> float:
+    p1 = _cohort_moderated_p_value(expr, metadata, "cohort1", gene)
+    p2 = _cohort_moderated_p_value(expr, metadata, "cohort2", gene)
+    return _fisher_combined_p(p1, p2)
+
+
 def _fisher_combined_p(p1: float, p2: float) -> float:
     statistic = -2.0 * (np.log(max(p1, 1e-300)) + np.log(max(p2, 1e-300)))
     return float(scipy_stats.chi2.sf(statistic, df=4))
@@ -269,7 +343,11 @@ def _compute_reference() -> dict[str, object]:
         same_sign = np.sign(r1["log2_fold_change"]) == np.sign(r2["log2_fold_change"])
         both_nominal = r1["p_value"] < NOMINAL_P_THRESHOLD and r2["p_value"] < NOMINAL_P_THRESHOLD
         if same_sign and both_nominal and is_robust(gene):
-            combined_p = _fisher_combined_p(float(r1["p_value"]), float(r2["p_value"]))
+            # Tiebreak uses MODERATED combined evidence (round 7): a
+            # candidate can look stronger on raw evidence purely because
+            # its own small-sample variance estimate happened, by chance,
+            # to come out unusually small in one cohort.
+            combined_p = _moderated_combined_p(expr, metadata, gene)
             replicated.append((gene, combined_p, r1, r2))
 
     assert replicated, "expected at least one gene to pass the independent-replication gate in the fixture data"

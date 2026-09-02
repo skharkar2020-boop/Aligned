@@ -64,26 +64,34 @@ of handling the two cohorts each name a different top gene:
 - **A sign-blind combined-p meta-analysis** (a real, common mistake:
   plugging each candidate gene's two independent cohort-level p-values
   into Fisher's method without first checking that the two cohorts agree
-  on effect *direction*): on this dataset it happens to still land on the
-  correct gene, but only because that gene's two p-values both happen to
-  be individually smaller -- the method itself never checked whether the
-  two cohorts were telling the same story, so citing it as the
-  `analysis_strategy` describes an unprincipled method that got lucky
-  here, not a defensible one.
-- **Preferring whichever gene replicates most *consistently*** across
-  cohorts, without also checking whether that apparent replication is
-  *robust*: promotes a gene whose cohort1 and cohort2 fold-changes look
-  almost identical (a striking, reassuring-looking consistency) over a
-  gene with a much stronger overall case but a bigger swing between
-  cohorts (a much stronger cohort1 effect that is real, but weaker and
-  noisier in cohort2). The catch is that the "consistent" gene's cohort2
-  significance is not actually carried by its treated group as a whole --
-  it depends on one or two individual samples. Drop either of them and its
-  cohort2 result is no longer significant, while the correct gene's own
-  (weaker, more heterogeneous) cohort2 evidence survives dropping any
-  single treated sample. Consistency of effect size across cohorts is not
-  the same thing as robustness of the underlying evidence, and only the
-  latter is what a claim of "this replicates" should actually rest on.
+  on effect *direction*): the method itself never checked whether the two
+  cohorts were telling the same story, and on this dataset that omission
+  is costly -- combined with never checking variance stability either, it
+  lands on the round-7 variance-fragile decoy (see below), not the
+  strongest generalizable candidate.
+- **Trusting the full, otherwise-correct per-cohort replication workflow**
+  (ID-based alignment, per-cohort DE, same-sign nominal significance in
+  both cohorts, leave-one-out robustness, preferring the strongest RAW
+  combined evidence among survivors) **without also checking variance
+  stability**: a gene exists in this dataset that is mechanically an
+  entirely ordinary hit -- the same generative process as the strongest
+  candidate (same baseline expression level, same true underlying
+  variability), differing only in which natural random draw it happened
+  to land on -- and clears every one of those checks more convincingly:
+  BH-significant in both cohorts (the correct answer is BH-significant
+  only in cohort1), a more consistent effect size across cohorts, and
+  stronger raw combined evidence. The reason is that its own within-group
+  sample variance in one cohort happened, purely by chance, to come out
+  anomalously small: with only 6 samples per group (5 residual degrees of
+  freedom), a single gene's own variance estimate is itself a noisy
+  quantity, and an unusually small realized variance inflates the
+  apparent significance of an otherwise-ordinary effect. This is a
+  genuinely different failure from the others in this list: it is not a
+  missing check for sign, significance, or leave-one-out robustness -- it
+  is a completely correct execution of the full replication procedure
+  that still reaches the wrong answer, because that procedure alone never
+  asks whether a candidate's own apparent strength is an artifact of a
+  favorable small-sample variance estimate.
 - **Checking nominal significance in both cohorts without checking sign
   agreement**: admits the confounded gene as "replicated" on the strength
   of its now-nominally-significant cohort1 p-value alone, missing that the
@@ -185,13 +193,33 @@ what makes reconciling them a judgment call rather than a lookup.
    materially stronger, still-replicating effect is available; nor is a
    gene automatically trustworthy just because it technically cleared the
    same-cohort bar.
-5. Report the surviving gene's own result from whichever cohort gives it
+5. That combined-evidence comparison has to use MODERATED per-cohort
+   p-values, not raw ones (round 7). With only 6 samples per group (5
+   residual degrees of freedom), a single gene's own within-group
+   variance estimate is itself a noisy quantity, and a candidate whose
+   apparent strength depends on an unusually (and unreliably) small
+   realized variance in one cohort is not the same scientific claim as
+   one whose strength holds up once that variance estimate is stabilized.
+   Fit an empirical-Bayes prior (degrees of freedom and typical variance)
+   from every candidate gene's own pooled within-group variance in that
+   cohort -- the same moment-based estimator behind limma's eBayes, with
+   no hand-picked prior weight, since limma-voom, edgeR's quasi-likelihood
+   pipeline, and DESeq2 (each estimating their own moderation strength
+   from the data) independently agree with the conclusion this produces
+   on the locked dataset -- shrink each candidate's variance toward that
+   prior, and recompute the combined-evidence ranking with the resulting
+   moderated p-values. One designed gene in this dataset clears same-sign
+   nominal significance, BH-FDR in both cohorts, and leave-one-out
+   robustness more convincingly than the strongest generalizable
+   candidate does on raw evidence, and still loses once variance
+   moderation is applied.
+6. Report the surviving gene's own result from whichever cohort gives it
    the stronger (smaller p-value) evidence, alongside both cohorts'
    individual fold-changes and a categorical description of how they
    relate to each other (consistent, or stronger in one cohort than the
    other), which cohort's own top hit was rejected and why, and the
    verified per-sample ID count.
-6. A prior report exists on disk describing an earlier, much smaller,
+7. A prior report exists on disk describing an earlier, much smaller,
    single-cohort pilot -- deliberately without naming a gene or giving
    numbers specific enough to identify one, so it cannot function as an
    answer shortcut. It is not sufficient evidence on its own; the
@@ -235,11 +263,19 @@ what makes reconciling them a judgment call rather than a lookup.
    clears the same significance bar the full-sample result did, the
    apparent replication is not real -- it is being carried by one or two
    samples, not the treated group as a whole.
-9. Among genes that replicate and are robust, prefer the one with the
-   stronger combined evidence over the one that is merely the most
-   uniform, unless the "stronger" candidate is actually the rejected
-   artifact from step 7 or the fragile candidate from step 8.
-10. Write `result.json` with the surviving gene's symbol, its log2
+9. For any candidate that clears step 8, re-rank using MODERATED combined
+   evidence rather than raw: fit an empirical-Bayes prior (degrees of
+   freedom and typical variance) from every candidate's own pooled
+   within-group variance in each cohort, shrink each candidate's variance
+   toward that prior, and recompute each cohort's p-value with the
+   shrunk variance before combining across cohorts. A candidate whose raw
+   strength depends on an unusually small realized variance in one cohort
+   will lose ground to one whose strength is not built on that.
+10. Among genes that replicate, are robust, and hold up under moderated
+   combined evidence, prefer the strongest, unless the "stronger"
+   candidate is actually the rejected artifact from step 7, the fragile
+   candidate from step 8, or the variance-fragile candidate from step 9.
+11. Write `result.json` with the surviving gene's symbol, its log2
    fold-change and BH-adjusted p-value from its stronger-evidence cohort,
    which analysis strategy was used, both cohorts' own fold-changes for
    that gene, a categorical heterogeneity assessment, the verified sample
@@ -261,28 +297,34 @@ internal check that the verifier would actually catch them, none of which
 crash or produce a NaN -- see task/README.md's calibration table for the
 actual numbers:
 
-- Naive pooled DE names a different gene outright (not merely a
-  contaminated estimate of the right one).
+- Naive pooled DE and a sign-blind combined-p meta-analysis both name the
+  round-7 variance-fragile decoy outright -- not merely a contaminated
+  estimate of the strongest generalizable candidate, a completely
+  different gene.
 - Trusting `cohort2` alone names a different gene entirely, with
   everything about it (fold-changes, heterogeneity label, rejected gene)
   wrong; its own cohort1 result is now nominally significant but
   wrong-signed.
-- A sign-blind combined-p meta-analysis happens to still land on the
-  correct gene here, but for reasons unrelated to sound method -- citing
-  it as the strategy used is itself a defensible-sounding but incorrect
-  description of how the answer was actually reached.
+- Running the complete, otherwise-correct replication procedure
+  (alignment, per-cohort DE, same-sign nominal significance, leave-one-out
+  robustness, prefer strongest RAW combined evidence) without also
+  checking variance stability also lands on the variance-fragile decoy:
+  it clears every one of those checks more convincingly, because its
+  apparent strength happens to rest on an anomalously small realized
+  variance in one cohort.
 - Preferring the most cross-cohort-consistent gene over the one with
-  materially stronger evidence (and never checking robustness) names a
-  gene that looks genuinely replicating on the surface -- its cohort1 and
-  cohort2 fold-changes are far more consistent than the correct answer's
-  -- but whose cohort2 significance turns out to depend on one or two
-  individual samples rather than the treated group as a whole; wrong on
-  every numeric field.
+  materially stronger evidence (and never checking robustness or variance
+  stability) names a gene that looks genuinely replicating on the
+  surface -- its cohort1 and cohort2 fold-changes are far more consistent
+  than the correct answer's -- but whose cohort2 significance turns out to
+  depend on one or two individual samples rather than the treated group as
+  a whole; wrong on every numeric field.
 - Admitting a candidate as "replicated" on significance alone, without
   checking that both cohorts agree on effect direction, wrongly folds the
   technical artifact (and the real-but-sign-reversing heterogeneous gene)
-  into the replicated pool; the correct top gene can still come out right
-  by luck, but `rejected_competing_gene` is wrong because neither
+  into the replicated pool; on this locked dataset the reported top gene
+  is wrong too (it still lands on the variance-fragile decoy), and
+  `rejected_competing_gene` is separately wrong because neither
   reversed-sign gene remains available to report there.
 - Citing the real-but-sign-reversing heterogeneous gene as the rejected
   competitor (rather than the genuine technical artifact) is wrong even
@@ -290,7 +332,12 @@ actual numbers:
   evidence is real but weaker than the actual technical artifact's.
 
 All are visibly different from the locked reference values on at least one
-checked field, and each fails for a different underlying reason. See
-task/README.md's "Round 6" section for the leave-one-out robustness
-mechanism itself and why it replaced an earlier, less scientifically
-airtight nominal-vs-BH-adjusted trap.
+checked field, and each fails for a different underlying reason. The
+moderated-variance tiebreak was independently validated against real
+limma-voom, edgeR's quasi-likelihood pipeline, and DESeq2 -- each
+estimating its own moderation strength from the data, none given any
+generator-known parameter -- and all three agree with the conclusion this
+task's own (self-calibrating, no hand-picked prior weight) reimplementation
+reaches. See task/README.md's "Round 7" section for the full comparison and
+numbers, and "Round 6" for the leave-one-out robustness mechanism this
+builds on.
