@@ -16,36 +16,67 @@ Ground truth (never exposed via file/column names in the public data):
     heterogeneity, not "null in one cohort." As of round 7 its own headline
     effect is deliberately modest (log2fc_c1=1.3, not a landslide winner
     against VARIANCE_DECOY_GENE on raw/unmoderated evidence).
-  - VARIANCE_DECOY_GENE (round 7) is mechanically an entirely ordinary
-    gene: the same generative model as TRUE_GENE (baseline=500,
-    sigma=0.25, a real, uniform condition effect in both cohorts, no
-    influential-sample trick, no latent-factor loading). It differs from
-    TRUE_GENE only in which natural noise draw it happens to land on
-    (panel position 83, chosen by searching many candidate positions for
-    one where this was true, not by manufacturing any sample's value): by
-    chance, its cohort2 within-group sample variance came out
-    anomalously small (~0.03 vs. an assigned/expected ~0.06), which
-    inflates its apparent significance there under a plain per-gene
-    Welch test -- with only 6 samples per group, a single gene's own
-    variance estimate is itself a noisy quantity (5 residual degrees of
-    freedom), and this is a real instance of that noise working in the
-    decoy's favor. Under ordinary Welch/BH/leave-one-out/Mann-Whitney
-    analysis, VARIANCE_DECOY_GENE beats TRUE_GENE on nearly every axis:
-    stronger raw combined evidence, BH-significant in both cohorts
-    (TRUE_GENE is BH-significant only in cohort1), and a more consistent
-    effect size across cohorts. Recovering TRUE_GENE requires recognizing
-    that this apparent strength is not robust to standard small-sample
-    variance moderation: empirical-Bayes-shrunk variance (see
+  - VARIANCE_DECOY_GENE (round 7, recalibrated round 7b) is mechanically
+    an entirely ordinary gene: the same generative model as TRUE_GENE
+    (baseline=500, sigma=0.25, a real, uniform condition effect in both
+    cohorts, no influential-sample trick, no latent-factor loading). It
+    differs from TRUE_GENE only in which natural noise draw it happens to
+    land on (panel position 119, chosen by searching many candidate
+    positions for one where this was true, not by manufacturing any
+    sample's value): by chance, its cohort2 within-group sample variance
+    came out smaller than its own cohort1 variance (~0.06 vs. ~0.12, a
+    real but moderate ~2x swing -- round 7b deliberately softened this
+    from round 7's original ~3x/0.03-vs-0.06 swing, see below), which
+    inflates its apparent significance there under a plain per-gene Welch
+    test -- with only 6 samples per group, a single gene's own variance
+    estimate is itself a noisy quantity (5 residual degrees of freedom),
+    and this is a real instance of that noise working in the decoy's
+    favor. Under ordinary Welch/BH/leave-one-out/Mann-Whitney analysis,
+    VARIANCE_DECOY_GENE beats TRUE_GENE on nearly every axis: stronger raw
+    combined evidence, BH-significant in both cohorts (TRUE_GENE is
+    BH-significant only in cohort1), and a more consistent effect size
+    across cohorts. Recovering TRUE_GENE requires recognizing that this
+    apparent strength is not robust to standard small-sample variance
+    moderation: empirical-Bayes-shrunk variance (see
     fit_ebayes_prior/cohort_moderated_p_value below -- a faithful,
     self-calibrating reimplementation of the same moment-based estimator
     behind limma's eBayes, with no hand-picked prior weight) pulls the
-    decoy's anomalously small cohort2 variance back toward the panel's
-    typical value, which is enough to flip the cross-cohort combined-
-    evidence ranking in TRUE_GENE's favor. Verified independently against
-    real limma-voom, edgeR's quasi-likelihood pipeline, and DESeq2 on this
+    decoy's smaller cohort2 variance back toward the panel's typical
+    value, which is enough to flip the cross-cohort combined-evidence
+    ranking in TRUE_GENE's favor. Verified independently against real
+    limma-voom, edgeR's quasi-likelihood pipeline, and DESeq2 on this
     exact locked dataset (see task/README.md): all three, each estimating
     their own moderation strength from the data rather than from any
     generator-known parameter, agree with this conclusion.
+  - NEAR_MISS_GENE (round 7b) closes a specific loophole found in a real
+    Harbor trajectory campaign: agents were reaching TRUE_GENE not by
+    computing genuine moderated variance, but by a much shallower proxy --
+    eyeballing whether a candidate's OWN pooled variance looks internally
+    consistent between its two cohorts (TRUE_GENE's happened to be ~0.085
+    in both; VARIANCE_DECOY_GENE's ~3x mismatch stood out by contrast).
+    That proxy is not the intended statistical reasoning (real moderation
+    borrows strength from the whole panel's variance distribution, not
+    from a single gene's own two numbers), so round 7b both softened
+    VARIANCE_DECOY_GENE's mismatch (above) and added NEAR_MISS_GENE: a
+    second, entirely ordinary gene (same generative model again, smaller
+    effect: log2fc_c1=0.8, log2fc_c2=0.7, panel position 34) whose own
+    cross-cohort variance ratio (~1.02) is just as clean as TRUE_GENE's,
+    and which independently clears full-panel BH significance in BOTH
+    cohorts with a more consistent effect size than TRUE_GENE -- i.e. it
+    passes every shallow checklist item (clean own-variance, BH-significant
+    both cohorts, consistent effect) that a naive-but-plausible-looking
+    analysis might use to shortlist a winner. It is a real, unmanipulated,
+    weaker treatment-associated signal (RNA-seq responses are rarely
+    single-gene-clean; a real analysis can and should surface more than
+    one plausible candidate), not a manufactured flaw -- it loses to
+    TRUE_GENE under genuine full-panel moderated combined-p by a clear
+    margin, confirmed against real limma-voom, edgeR-QL, and DESeq2 (see
+    task/README.md), but "clean own-variance + BH-significant both
+    cohorts + consistent effect" alone no longer uniquely identifies
+    TRUE_GENE now that two genes satisfy it. Distinguishing TRUE_GENE from
+    both decoys requires integrating properly-moderated combined evidence
+    across the whole candidate set, not any single diagnostic in
+    isolation.
   - CONFOUND_GENE has no true biological condition effect in either cohort.
     It carries a real, deliberate *latent* technical artifact confined to
     cohort2: a continuous per-sample latent factor Z (never written to any
@@ -270,6 +301,7 @@ DESIGNED_GENES = {
     "GHOST_REPLICATOR": {"baseline": 300.0, "sigma": 0.28, "log2fc_c1": 0.42, "log2fc_c2": 0.42, "z_loading": 0.8},
     "REAL_HETEROGENEITY_GENE": {"baseline": 300.0, "sigma": 0.22, "log2fc_c1": 0.8, "log2fc_c2": -0.8, "z_loading": 0.0},
     "VARIANCE_DECOY_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.0, "log2fc_c2": 0.9, "z_loading": 0.0},
+    "NEAR_MISS_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 0.8, "log2fc_c2": 0.7, "z_loading": 0.0},
     "SENTINEL_1": {"baseline": 280.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 0.8},
     "SENTINEL_2": {"baseline": 260.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": -0.6},
     "SENTINEL_3": {"baseline": 300.0, "sigma": 0.30, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 1.0},
@@ -284,7 +316,8 @@ DESIGNED_POSITIONS = {
     "CONSISTENCY_GENE": 203,
     "GHOST_REPLICATOR": 33,
     "REAL_HETEROGENEITY_GENE": 260,
-    "VARIANCE_DECOY_GENE": 83,
+    "VARIANCE_DECOY_GENE": 119,
+    "NEAR_MISS_GENE": 34,
     "SENTINEL_1": 15,
     "SENTINEL_2": 249,
     "SENTINEL_3": 61,

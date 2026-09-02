@@ -257,9 +257,9 @@ and is a boolean (`true`) regardless of which gene ends up reported.
 
 ### Calibration record (n_genes=300, n_samples=24 across 2 cohorts of 12)
 
-**Note: this table reflects the round-7 recalibrated dataset (see "Round 7"
-below); pre-round-7 numbers are preserved in the "Round 6" section's own
-text for historical record, but no longer describe the locked data.**
+**Note: this table reflects the round-7b recalibrated dataset (see "Round
+7b" below); pre-round-7b numbers are preserved in the "Round 7" section's
+own text for historical record, but no longer describe the locked data.**
 
 Designed gene parameters in `generate_data.py`'s `DESIGNED_GENES`:
 `TRUE_GENE` baseline=500/sigma=0.25/log2FC c1=1.3,c2=0.9/z_loading=0 (round
@@ -270,46 +270,55 @@ raw evidence);
 (round 6's fragile-replication mechanism, unchanged);
 `GHOST_REPLICATOR` baseline=300/sigma=0.28/log2FC c1=0.42,c2=0.42/z_loading=0.8;
 `REAL_HETEROGENEITY_GENE` baseline=300/sigma=0.22/log2FC c1=0.8,c2=-0.8/z_loading=0;
-`VARIANCE_DECOY_GENE` (round 7, new) baseline=500/sigma=0.25/log2FC
+`VARIANCE_DECOY_GENE` (round 7, recalibrated round 7b) baseline=500/sigma=0.25/log2FC
 c1=1.0,c2=0.9/z_loading=0 -- mechanically identical generative model to
-`TRUE_GENE`, differing only in which panel position (83) it occupies and
-therefore which natural noise draw it receives;
+`TRUE_GENE`, differing only in which panel position (119, moved from round
+7's 83) it occupies and therefore which natural noise draw it receives;
+`NEAR_MISS_GENE` (round 7b, new) baseline=500/sigma=0.25/log2FC
+c1=0.8,c2=0.7/z_loading=0 -- again mechanically identical to `TRUE_GENE`,
+smaller designed effect, panel position 34;
 six `SENTINEL_*` genes, baseline 240-320/sigma=0.30/log2FC=0 both
 cohorts/z_loading in {+-0.5..1.0}. Latent factor `DELTA_Z=1.2`,
 `Z_SD=0.3`, `cohort2` only (still used by `CONFOUND_GENE`/`GHOST_REPLICATOR`/
-sentinels; not used by `CONSISTENCY_GENE` or `VARIANCE_DECOY_GENE`).
+sentinels; not used by `CONSISTENCY_GENE`, `VARIANCE_DECOY_GENE`, or
+`NEAR_MISS_GENE`).
 
 All values below are from the actual generated dataset, run through the
 actual shipped/reference code, not hand-derived. Designed gene symbols in
 this run: `TRUE_GENE`=`CACNA619`, `CONFOUND_GENE`=`PSMB19`,
 `CONSISTENCY_GENE`=`VPS749`, `GHOST_REPLICATOR`=`RAB544`,
-`REAL_HETEROGENEITY_GENE`=`USP863`, `VARIANCE_DECOY_GENE`=`KCNH867`
+`REAL_HETEROGENEITY_GENE`=`USP863`, `VARIANCE_DECOY_GENE`=`RPS114`,
+`NEAR_MISS_GENE`=`ARF806`
 (re-generating the dataset reassigns symbols deterministically but keeps
 the same statistical structure).
 
 | Scenario | top_gene | log2FC (home cohort) | adjusted p | cohort1 log2FC | cohort2 log2FC | heterogeneity_assessment | rejected_competing_gene | notes |
 |---|---|---|---|---|---|---|---|---|
-| **Correct (ID-based, per-cohort independent replication, robust to leave-one-out, strongest MODERATED combined evidence) -- locked ground truth** | `CACNA619` | 1.6241 | 7.25e-04 | 1.6241 | 0.5962 | `stronger_in_cohort1_weaker_in_cohort2` | `PSMB19` | both cohorts nominally significant, same sign, robust (worst-case leave-one-out p=0.024 in `cohort2`); loses to `KCNH867` on RAW combined evidence (3.06e-07 vs. 5.08e-08) but wins on MODERATED combined evidence (3.47e-07 vs. 8.14e-06) -- the round-7 tie-break |
+| **Correct (ID-based, per-cohort independent replication, robust to leave-one-out, strongest MODERATED combined evidence) -- locked ground truth** | `CACNA619` | 1.6212 | 7.47e-04 | 1.6212 | 0.5952 | `stronger_in_cohort1_weaker_in_cohort2` | `PSMB19` | both cohorts nominally significant, same sign, robust (worst-case leave-one-out p=0.024 in `cohort2`); loses to `RPS114` on RAW combined evidence (3.17e-07 vs. 2.00e-07) but wins on MODERATED combined evidence (3.51e-07 vs. 7.92e-07) -- the round-7 tie-break, now a ~2.3x margin instead of round 7's ~23x, deliberately softened in round 7b |
 | As shipped | -- | -- | -- | -- | -- | -- | -- | crashes on `np.float` before producing any output |
 | Fix only `np.float`, pandas stays 1.5.3, pooled 24 samples, misaligned | different unrelated null gene | ~0 | ~1.0 | -- | -- | -- | -- | nothing reaches significance |
 | Same, pandas upgraded to 2.2.3 | a different unrelated null gene | ~0 | ~1.0 | -- | -- | -- | -- | different wrong gene, still nothing significant |
-| Correct alignment, all 24 pooled, no cohort split | `KCNH867` (wrong gene) | 0.934 | 9.94e-07 | 0.983 | 0.885 | `consistent_both_cohorts` | -- | pooling names the round-7 decoy outright |
+| Correct alignment, all 24 pooled, no cohort split | `RPS114` (wrong gene) | 1.086 | ~7e-06 | 1.198 | 0.972 | `consistent_both_cohorts` | -- | pooling names the round-7 decoy outright |
 | Correct alignment, cohort split, but trusting `cohort2` alone | `PSMB19` | 6.333 | ~1.3e-04 (BH, cohort2-only) | -0.360 | 6.333 | `opposite_direction_between_cohorts` (its own) | `CACNA619` (wrong) | confidently significant, wrong gene; its own `cohort1` result now clears nominal p<0.05 but with the *opposite* sign |
-| Correct alignment, cohort split, sign-blind combined-p meta-analysis (no direction check, RAW combined-p) | `KCNH867` (wrong gene) | 0.885 | 7.92e-04 | 0.983 | 0.885 | `consistent_both_cohorts` | `PSMB19` | unlike round 6, this no longer even lands on the right gene by luck -- omitting both the sign check and variance moderation compounds |
-| **Correct alignment, cohort split, same-sign + nominal + leave-one-out robust, but tiebreak on RAW combined-p (the full round-6 procedure, no round-7 moderation)** | `KCNH867` (wrong gene) | 0.885 | 7.92e-04 | 0.983 | 0.885 | `consistent_both_cohorts` | `PSMB19` | a completely correct execution of every check through round 6 still reaches the wrong answer -- `KCNH867`'s apparent strength (BH-significant both cohorts, more consistent effect size, 6x stronger raw combined p) rests on an anomalously small realized `cohort2` variance (0.030 vs. an expected ~0.06); real limma-voom/edgeR-QL/DESeq2, each self-estimating their own moderation strength, agree `CACNA619` is the better-supported candidate once this is corrected (5/9) |
+| Correct alignment, cohort split, sign-blind combined-p meta-analysis (no direction check, RAW combined-p) | `RPS114` (wrong gene) | 0.972 | 4.80e-03 | 1.198 | 0.972 | `consistent_both_cohorts` | `PSMB19` | unlike round 6, this no longer even lands on the right gene by luck -- omitting both the sign check and variance moderation compounds |
+| **Correct alignment, cohort split, same-sign + nominal + leave-one-out robust, but tiebreak on RAW combined-p (the full round-6 procedure, no round-7 moderation)** | `RPS114` (wrong gene) | 0.972 | 4.80e-03 | 1.198 | 0.972 | `consistent_both_cohorts` | `PSMB19` | a completely correct execution of every check through round 6 still reaches the wrong answer -- `RPS114`'s apparent strength (BH-significant both cohorts, more consistent effect size, slightly stronger raw combined p) rests on a smaller realized `cohort2` variance (0.061 vs. its own `cohort1` value 0.123, a real but moderate ~2x swing -- round 7b's softened version of round 7's ~3x swing); real limma-voom/edgeR-QL/DESeq2, each self-estimating their own moderation strength, agree `CACNA619` is the better-supported candidate once this is corrected (5/9) |
+| **Round 7b: clean-own-variance + BH-significant-both-cohorts + consistent-effect-size checklist, without a genuine panel-wide moderated combined-p computation** | `ARF806` (wrong gene) | 1.096 | 2.16e-02 | 1.096 | 0.940 | `consistent_both_cohorts` | `CACNA619` (wrong) | the specific loophole this round closes: `ARF806`'s own cross-cohort variance ratio (~1.02) is as clean as `CACNA619`'s (~1.00), and unlike `RPS114` it also clears full-panel BH significance in both cohorts with a more consistent effect size than `CACNA619` -- so a shallow "avoid the one flagged gene, prefer the other clean/consistent/BH-significant candidate" heuristic now lands on the wrong gene; only genuine moderated combined-p, integrated across all three qualifying candidates, correctly ranks `CACNA619` first (3/9) |
 | Correct alignment, cohort split, prefer most-consistent-across-cohorts over strongest-evidence (and never checks robustness or moderation) | `VPS749` | 1.083 | 3.08e-02 (cohort1-only BH) | 1.078 | 1.148 | `consistent_both_cohorts` | `PSMB19` | `VPS749`'s own cross-cohort consistency is itself a leave-one-out artifact (round 6); fails `top_gene` and every numeric field (4/9) |
-| Correct alignment, cohort split, naive "clears nominal significance in both cohorts" without a same-sign check | `KCNH867` (wrong gene) | -- | -- | 0.983 (p=3.1e-4) | 0.885 (p=7.9e-6) | `consistent_both_cohorts` | `MAP837` (wrong) | admits `PSMB19` and `USP863` into the "replicated" pool on significance alone despite reversed sign, so neither is available as `rejected_competing_gene`; `top_gene` is now also wrong (unlike round 6, sign-blind combined evidence no longer rescues it) (3/9) |
-| Report `REAL_HETEROGENEITY_GENE` as `rejected_competing_gene` | `CACNA619` (right gene, wrong `rejected_competing_gene`) | 1.6241 | 7.25e-04 | 1.6241 | 0.5962 | `stronger_in_cohort1_weaker_in_cohort2` | `USP863` (wrong) | correctly excluded from `top_gene` by the same-sign rule, but should not be cited as `rejected_competing_gene` either, since `PSMB19`'s single-cohort evidence (p=4.2e-7) is stronger (8/9) |
+| Correct alignment, cohort split, naive "clears nominal significance in both cohorts" without a same-sign check | `RPS114` (wrong gene) | -- | -- | 1.198 (p=1.6e-4) | 0.972 (p=6.4e-5) | `consistent_both_cohorts` | `MAP837` (wrong) | admits `PSMB19` and `USP863` into the "replicated" pool on significance alone despite reversed sign, so neither is available as `rejected_competing_gene`; `top_gene` is now also wrong (unlike round 6, sign-blind combined evidence no longer rescues it) (3/9) |
+| Report `REAL_HETEROGENEITY_GENE` as `rejected_competing_gene` | `CACNA619` (right gene, wrong `rejected_competing_gene`) | 1.6212 | 7.47e-04 | 1.6212 | 0.5952 | `stronger_in_cohort1_weaker_in_cohort2` | `USP863` (wrong) | correctly excluded from `top_gene` by the same-sign rule, but should not be cited as `rejected_competing_gene` either, since `PSMB19`'s single-cohort evidence (p=4.2e-7) is stronger (8/9) |
 
 Every wrong scenario fails at least one of the verifier's checks, each for
 a different reason. Note the qualitative shift from round 6: three separate
 scenarios (naive pooling, sign-blind Fisher, and the full round-6 procedure
-without moderation) now all converge on the SAME wrong gene, `KCNH867` --
+without moderation) now all converge on the SAME wrong gene, `RPS114` --
 this is the intended signature of a genuinely adversarial decoy, not a
-coincidence: `KCNH867` is designed to be the strongest-looking candidate
+coincidence: `RPS114` is designed to be the strongest-looking candidate
 under every ordinary/raw method, so any method that omits the round-7
 moderation check lands on it regardless of which other checks it does or
-doesn't perform correctly.
+doesn't perform correctly. Round 7b adds a second, qualitatively different
+failure mode (`ARF806`) that survives even a correctly-executed variance
+sanity-check, since it does not depend on flagging `RPS114`'s anomaly at
+all -- see "Round 7b" below.
 
 Re-run the generator to reproduce: `python3 data_generation/generate_data.py`
 from the project root writes `data_generation/public/*.csv` and
@@ -319,13 +328,16 @@ from the project root writes `data_generation/public/*.csv` and
 
 ## Open items for the human author
 
-- **Round 7 is the current state.** The round-6 dataset and calibration
-  numbers below (and the round-6 Harbor campaign result) are historical
-  record and no longer describe the locked data -- see "Round 7" above for
-  what changed and why. A fresh real-agent Harbor trial against the
-  round-7 dataset has not yet been run; that -- and updating
-  `task.toml`'s `difficulty_explanation` with the result once it's in
-  (per that field's own constraint, in this file only, not in
+- **Round 7b is the current state.** The round-6 and round-7 dataset and
+  calibration numbers are historical record and no longer describe the
+  locked data -- see "Round 7" and "Round 7b" above for what changed and
+  why. A real round-7 Harbor campaign (4 trials/agent) showed Claude 3/4
+  and Codex 3/4 genuine scientific failures (both clearing the gate) but
+  Gemini only 1/4; round 7b's recalibration targets that specific gap. A
+  fresh 12-trajectory Harbor campaign against the round-7b dataset,
+  followed by trajectory-review, has not yet been run; that -- and
+  updating `task.toml`'s `difficulty_explanation` with the result once
+  it's in (per that field's own constraint, in this file only, not in
   `difficulty_explanation` itself) -- is the immediate next step.
 - `instruction.md` and `task.toml` are both complete -- the author wrote
   `difficulty_explanation`/`solution_explanation`/`verification_explanation`
@@ -757,3 +769,119 @@ strength rather than a fixed constant -- addressing the one respect in
 which the original design, while numerically sound, would not have
 satisfied this round's stricter "no hidden hand-picked convention"
 requirement.
+
+## Round 7b: closing the loophole a real Gemini campaign found
+
+A real Harbor campaign against the round-7 dataset (4 trials each for
+Claude Opus, Codex, and Gemini via Antigravity CLI) showed the redesign
+working as intended for two of the three agents -- Claude 3/4 and Codex
+3/4 genuine scientific failures, both clearing the difficulty gate -- but
+Gemini only failed genuinely 1/4 (3/4 passed). Per the redesign's own
+"do not just make the trap louder" constraint, the fix required first
+understanding *why* Gemini's three passing trials succeeded, not simply
+enlarging the existing signal or adding an undisclosed verifier rule.
+
+**Trajectory analysis.** The one failing Gemini trial used a pure
+"clears full-panel BH significance in both cohorts + leave-one-out-robust
++ consistent effect direction" pipeline -- exactly the intended "obvious
+workflow" trap, with zero mention of variance, moderation, or small-sample
+uncertainty anywhere in its reasoning. The two passing trials, however, did
+**not** perform genuine empirical-Bayes moderation either -- neither
+transcript contains the words "shrink," "empirical," "limma," "moderat,"
+or any prior/`d0` concept. Instead, both cited `CACNA619`'s own pooled
+variance as numerically similar across its two cohorts (quoting
+`s^2~=0.085` in each) and called that "stable," without ever computing or
+citing `KCNH867`'s own per-cohort variance for a real contrastive
+comparison. Recomputing the actual locked-dataset numbers confirmed
+exactly this shallow signal was available: `CACNA619`'s own pooled
+variance was 0.081 in `cohort1` vs. 0.114 in `cohort2` (ratio ~1.4x, and
+in the pipeline's own CPM-normalized values, coincidentally ~1.00x --
+0.0852 vs. 0.0854), while `KCNH867`'s was 0.146 vs. 0.048 (ratio ~3.0x).
+"Does this gene's own variance look internally consistent between its two
+cohorts?" is a much shallower proxy than real empirical-Bayes moderation
+(which borrows strength from the whole panel's variance distribution, not
+from a single gene's own two numbers) -- but in the round-7 calibration it
+happened to point the same direction. One passing trial's own methodology
+list ("FDR-corrected significance... direction consistency, sample-level
+robustness..., and variance stability") and its "stable variance" phrasing
+also closely echo `instruction.md`'s own disclosed sentence ("consider the
+stability of each candidate's own variance estimate"), suggesting the
+successful trials may have pattern-matched on that language rather than
+computing a real shrinkage estimate.
+
+**Recalibration.** Two changes close this loophole without touching
+`instruction.md` or the verifier's pass/fail logic, and without simply
+amplifying `KCNH867`'s existing anomaly (which risks making it *more*,
+not less, noticeable):
+
+1. `VARIANCE_DECOY_GENE` was moved from panel position 83 to 119 (new
+   symbol `RPS114`), found by the same natural-noise-draw search as
+   before, but selected for a deliberately *more subtle* cross-cohort
+   variance swing (~2.0x, `cohort1`=0.123 vs. `cohort2`=0.061) instead of
+   round 7's ~3.0x, while keeping its raw/naive combined-evidence
+   advantage over `CACNA619` intact (still BH-significant in both
+   cohorts, still a more consistent effect size, still winning on raw
+   combined-p) so the intended "obvious workflow" trap is unaffected.
+2. `NEAR_MISS_GENE` (new, symbol `ARF806`, panel position 34) was added:
+   mechanically identical generative model again (baseline=500,
+   sigma=0.25, no confound, no influential-sample trick), smaller designed
+   effect (`log2fc_c1`=0.8, `log2fc_c2`=0.7). Its own cross-cohort variance
+   ratio (~1.02) is just as "clean" as `CACNA619`'s, and unlike `RPS114`
+   it independently clears full-panel BH significance in *both* cohorts
+   with a more consistent effect size than `CACNA619` -- i.e. it passes
+   every item on the shallow checklist ("own variance looks stable" +
+   "BH-significant both cohorts" + "consistent effect size") that the
+   successful Gemini trials appear to have used. A real, unmanipulated,
+   weaker candidate is a legitimate feature of RNA-seq data (responses are
+   rarely single-gene-clean), not a contrived trap -- it loses to
+   `CACNA619` under genuine full-panel moderated combined-p by a clear,
+   real margin (order-of-magnitude, not landslide), but "clean own-variance
+   + BH-significant both cohorts + consistent effect" alone no longer
+   uniquely identifies `CACNA619` now that two genes satisfy it, and one
+   of the two (`ARF806`) is not even the one a "watch for a variance
+   anomaly" heuristic would have flagged.
+
+**Numeric result on the recalibrated dataset.** All three qualifying
+candidates (same-sign, nominally significant in both cohorts, leave-one-
+out robust) rank as follows on MODERATED combined-p: `CACNA619`
+(3.51e-07) < `RPS114` (7.92e-07, ~2.3x behind) < `ARF806` (4.73e-06, ~13x
+behind). `RPS114` still beats `CACNA619` on every raw/naive metric (raw
+combined-p 2.00e-07 vs. 3.17e-07, BH-significant both cohorts vs.
+`CACNA619`'s cohort1-only, more consistent effect size). `ARF806` beats
+neither on raw combined-p, but matches or beats `CACNA619` on the "clean
+own-variance + BH-both-cohorts + consistent effect" checklist that a
+variance-aware-but-not-genuinely-moderated analysis might use.
+
+**Independent validation against real tools, recalibrated dataset:**
+
+| Framework | `CACNA619` combined p | `RPS114` combined p | `ARF806` combined p |
+|---|---|---|---|
+| limma-voom (`eBayes`, own estimated `df.prior`) | 6.08e-08 | 1.84e-07 | 9.59e-07 |
+| edgeR quasi-likelihood (`glmQLFit`, own estimated prior df) | 6.26e-08 | 2.65e-07 | 9.57e-07 |
+| DESeq2 (own dispersion-shrinkage trend) | 1.07e-14 | 4.86e-11 | 6.22e-09 |
+| This task's own moment-estimator (no fixed `d0`) | 3.51e-07 | 7.92e-07 | 4.73e-06 |
+
+All four independent implementations agree on the same ranking
+(`CACNA619` < `RPS114` < `ARF806`), each estimating its own moderation
+strength from the recalibrated data.
+
+**Files touched:** `data_generation/generate_data.py` (`VARIANCE_DECOY_GENE`
+repositioned 83->119; `NEAR_MISS_GENE` added to `DESIGNED_GENES`/
+`DESIGNED_POSITIONS`; module docstring updated); `task/tests/test_outputs.py`
+(`DIRECTION_MISMATCH_PATTERNS` broadened, unrelated verifier-brittleness
+fix applied first per the redesign brief, before any data change: `chang\w*`
+added as a trigger word and `to` added as a connector, so phrasing like
+"changed direction from negative in cohort1 to positive in cohort2" is
+recognized); `task/instruction.md` and `task/tests/test_outputs.py`'s
+pass/fail logic **not** touched -- the fix is entirely in the data
+calibration, not in any new disclosed or hidden rule.
+
+**Re-verification performed:** oracle re-run end to end, 9/9. Two new
+wrong-scenario walkthroughs specific to this round (`RPS114` as `top_gene`,
+the round-7 decoy story with softened numbers; `ARF806` as `top_gene`, the
+new near-miss loophole) both fail the verifier (3/9 each) for the expected
+reasons. All prior wrong-scenario walkthroughs re-verified against the
+regenerated dataset with updated numbers, still failing for the same
+structural reasons. A fresh 12-trajectory Harbor campaign against this
+recalibrated dataset, followed by trajectory-review, is the next step (see
+"Open items").
