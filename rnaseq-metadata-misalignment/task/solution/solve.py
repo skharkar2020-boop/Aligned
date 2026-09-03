@@ -121,30 +121,50 @@ def fisher_combined_p(p1: float, p2: float) -> float:
     return float(scipy_stats.chi2.sf(statistic, df=4))
 
 
-def cohort_treated_worst_case_loo_p(
+def cohort_symmetric_worst_case_loo_p(
     expr: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str
 ) -> float:
-    """Robustness check: drop each treated sample in this cohort once, and
-    return the worst (largest) Welch p-value seen. A candidate's cohort-
-    level significance has to survive removing its single most favorable
-    treated sample -- a real, broadly-shared effect should not depend on
-    any one sample; a nominally significant result that isn't robust to
-    that removal isn't the same scientific claim as one that is.
+    """Robustness check: drop each individual sample in this cohort once --
+    control or treated, not only treated -- refit the moderated-variance
+    prior (fit_ebayes_prior) on that reduced sample set, and return the
+    worst (largest) moderated p-value seen. A candidate's cohort-level
+    evidence has to survive removing its single most favorable sample, with
+    the shrinkage prior re-estimated on the data actually being analyzed
+    each time, not reused from the full-sample fit; a result that only
+    looks robust because the robustness check itself only ever drops
+    treated samples, or because it silently reuses stale full-sample
+    moderation while claiming to test a smaller subset, is not actually a
+    robustness claim.
     """
     ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
     condition = metadata.set_index("sample_id").loc[ids, "condition"]
-    control_ids = [sid for sid in ids if condition[sid] == "control"]
-    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
-
-    log2cpm = pipeline_stats.compute_log2_cpm(expr[ids])
-    control_vals = log2cpm.loc[gene, control_ids].to_numpy()
 
     worst_p = 0.0
-    for drop in treated_ids:
-        remaining = [sid for sid in treated_ids if sid != drop]
-        treated_vals = log2cpm.loc[gene, remaining].to_numpy()
-        _, p = scipy_stats.ttest_ind(treated_vals, control_vals, equal_var=False)
-        worst_p = max(worst_p, float(p))
+    for drop in ids:
+        remaining = [sid for sid in ids if sid != drop]
+        control_ids = [sid for sid in remaining if condition[sid] == "control"]
+        treated_ids = [sid for sid in remaining if condition[sid] == "treated"]
+        n1, n2 = len(control_ids), len(treated_ids)
+        df_g = n1 + n2 - 2
+
+        log2cpm = pipeline_stats.compute_log2_cpm(expr[remaining])
+        var_c = log2cpm[control_ids].var(axis=1, ddof=1)
+        var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
+        pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
+
+        d0, s0_sq = fit_ebayes_prior(pooled_var.to_numpy(), df_g)
+        if np.isinf(d0):
+            mod_var = s0_sq
+            mod_df = 1e6
+        else:
+            mod_var = (d0 * s0_sq + df_g * float(pooled_var[gene])) / (d0 + df_g)
+            mod_df = d0 + df_g
+
+        mean_diff = float(log2cpm.loc[gene, treated_ids].mean() - log2cpm.loc[gene, control_ids].mean())
+        se = float(np.sqrt(mod_var * (1.0 / n1 + 1.0 / n2)))
+        t_mod = mean_diff / se
+        p = float(2.0 * scipy_stats.t.sf(abs(t_mod), df=mod_df))
+        worst_p = max(worst_p, p)
     return worst_p
 
 
@@ -257,8 +277,8 @@ def main() -> None:
 
     def is_robust(gene: str) -> bool:
         return (
-            cohort_treated_worst_case_loo_p(expr, metadata, cohort1, gene) < NOMINAL_P_THRESHOLD
-            and cohort_treated_worst_case_loo_p(expr, metadata, cohort2, gene) < NOMINAL_P_THRESHOLD
+            cohort_symmetric_worst_case_loo_p(expr, metadata, cohort1, gene) < NOMINAL_P_THRESHOLD
+            and cohort_symmetric_worst_case_loo_p(expr, metadata, cohort2, gene) < NOMINAL_P_THRESHOLD
         )
 
     replicated = []
@@ -324,8 +344,8 @@ def main() -> None:
         # apparent replication in at least one cohort turns out to hinge on
         # one or two individual treated samples -- drop the single most
         # influential one and the effect is no longer significant there.
-        worst_c1 = cohort_treated_worst_case_loo_p(expr, metadata, cohort1, rejected_competing_gene)
-        worst_c2 = cohort_treated_worst_case_loo_p(expr, metadata, cohort2, rejected_competing_gene)
+        worst_c1 = cohort_symmetric_worst_case_loo_p(expr, metadata, cohort1, rejected_competing_gene)
+        worst_c2 = cohort_symmetric_worst_case_loo_p(expr, metadata, cohort2, rejected_competing_gene)
         fragile_cohort, worst_p = (cohort1, worst_c1) if worst_c1 >= worst_c2 else (cohort2, worst_c2)
         rejection_detail = (
             f"its apparent replication in {fragile_cohort} is not robust -- "

@@ -107,13 +107,22 @@ NOMINAL_P_THRESHOLD = 0.05
 
 # A gene that clears same-sign + nominal significance in both cohorts can
 # still be a false replication if that significance is carried by one or
-# two outsized samples rather than the treated group as a whole. The
-# robustness check reuses NOMINAL_P_THRESHOLD rather than a second,
-# independently-chosen cutoff: within a cohort's treated group, drop each
-# treated sample once (leave-one-out) and recompute the gene's p-value
-# against the full control group; the worst (largest) p-value seen across
-# those drops must still clear NOMINAL_P_THRESHOLD. See task/README.md for
-# the locked-dataset numbers this separates.
+# two outsized samples rather than the treated group as a whole -- or if a
+# candidate's own small-sample variance estimate happened to come out
+# unusually favorable in one cohort. The robustness check reuses
+# NOMINAL_P_THRESHOLD rather than a second, independently-chosen cutoff:
+# within a cohort, drop each individual sample once (control or treated,
+# not only treated), refit the moderated-variance prior on that reduced
+# sample set, and recompute the gene's moderated p-value; the worst
+# (largest) p-value seen across those drops must still clear
+# NOMINAL_P_THRESHOLD. Both the symmetry (any sample) and the refit (the
+# shrinkage prior is re-estimated on the data actually being analyzed each
+# time, not reused from the full-sample fit) are required for this to be a
+# genuine robustness claim -- a check that only ever drops treated samples,
+# or that silently reuses a stale full-sample moderation estimate while
+# claiming to test a smaller subset, is not actually testing what it
+# claims to. See task/README.md for the locked-dataset numbers this
+# separates.
 
 RATIONALE_MIN_LEN = 40
 
@@ -219,21 +228,38 @@ def _differential_expression_for_cohort(
     return _differential_expression(counts, condition).sort_values("adjusted_p_value")
 
 
-def _cohort_treated_worst_case_loo_p(
+def _cohort_symmetric_worst_case_loo_p(
     expr: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str
 ) -> float:
     ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
     condition = metadata.set_index("sample_id").loc[ids, "condition"]
-    control_ids = [sid for sid in ids if condition[sid] == "control"]
-    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
-    log2cpm = _compute_log2_cpm(expr[ids])
-    control_vals = log2cpm.loc[gene, control_ids].to_numpy(dtype=float)
+
     worst_p = 0.0
-    for drop in treated_ids:
-        remaining = [sid for sid in treated_ids if sid != drop]
-        treated_vals = log2cpm.loc[gene, remaining].to_numpy(dtype=float)
-        _, p = scipy_stats.ttest_ind(treated_vals, control_vals, equal_var=False)
-        worst_p = max(worst_p, float(p))
+    for drop in ids:
+        remaining = [sid for sid in ids if sid != drop]
+        control_ids = [sid for sid in remaining if condition[sid] == "control"]
+        treated_ids = [sid for sid in remaining if condition[sid] == "treated"]
+        n1, n2 = len(control_ids), len(treated_ids)
+        df_g = n1 + n2 - 2
+
+        log2cpm = _compute_log2_cpm(expr[remaining])
+        var_c = log2cpm[control_ids].var(axis=1, ddof=1)
+        var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
+        pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
+
+        d0, s0_sq = _fit_ebayes_prior(pooled_var.to_numpy(), df_g)
+        if np.isinf(d0):
+            mod_var = s0_sq
+            mod_df = 1e6
+        else:
+            mod_var = (d0 * s0_sq + df_g * float(pooled_var[gene])) / (d0 + df_g)
+            mod_df = d0 + df_g
+
+        mean_diff = float(log2cpm.loc[gene, treated_ids].mean() - log2cpm.loc[gene, control_ids].mean())
+        se = float(np.sqrt(mod_var * (1.0 / n1 + 1.0 / n2)))
+        t_mod = mean_diff / se
+        p = float(2.0 * scipy_stats.t.sf(abs(t_mod), df=mod_df))
+        worst_p = max(worst_p, p)
     return worst_p
 
 
@@ -342,8 +368,8 @@ def _compute_reference() -> dict[str, object]:
 
     def is_robust(gene: str) -> bool:
         return (
-            _cohort_treated_worst_case_loo_p(expr, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
-            and _cohort_treated_worst_case_loo_p(expr, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
+            _cohort_symmetric_worst_case_loo_p(expr, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
+            and _cohort_symmetric_worst_case_loo_p(expr, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
         )
 
     replicated = []

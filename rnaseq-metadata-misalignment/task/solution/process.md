@@ -134,9 +134,10 @@ what makes reconciling them a judgment call rather than a lookup.
    correctly -- crash and misalignment fixed, per-cohort split, same-sign
    replication check -- but applied BH-FDR within cohort2 as its
    replication bar instead of the nominal threshold, which flips the
-   answer to CONSISTENCY_GENE: TRUE_GENE's cohort2 raw p=0.016 clears
-   0.05 easily, but its cohort2-only BH-adjusted p=0.33 does not. Verified
-   on the locked dataset, not asserted.) Checking significance without
+   answer away from the strongest generalizable candidate: TRUE_GENE's
+   cohort2 raw p=4.3e-3 clears 0.05 easily, but its cohort2-only
+   BH-adjusted p=0.098 does not. Verified on the locked dataset, not
+   asserted.) Checking significance without
    checking sign is also not sufficient, for a separate reason:
    the technical-artifact gene's own cohort1 result now clears p<0.05 on
    its own, and only fails because it points the opposite direction from
@@ -168,18 +169,20 @@ what makes reconciling them a judgment call rather than a lookup.
    competing gene when a stronger, genuinely-technical candidate exists.
 3. A candidate that passes the same-sign, nominally-significant check in
    both cohorts still is not automatically trustworthy: check whether that
-   significance is *robust*, not just present. Within the cohort where the
-   candidate's confirming evidence is weakest, drop each treated sample
-   once (leave-one-out) and recompute its p-value against the full control
-   group; the worst (largest) p-value seen across those single-sample
-   drops must still clear the same nominal significance bar used
-   everywhere else. A candidate whose apparent replication only holds
-   because of one or two individual samples is not a real replicated
-   effect, however clean and consistent its headline fold-changes look.
-   One designed gene in this dataset clears ordinary same-sign nominal
-   significance in both cohorts, with a strikingly *consistent* effect
-   size across them, and still fails this check -- its cohort2 result
-   depends on two specific samples and evaporates without them.
+   significance is *robust*, not just present. Within each cohort, drop
+   each individual sample once -- control or treated, not only treated --
+   refit the moderated-variance prior on that reduced sample set (see
+   step 9's shrinkage procedure), and recompute the candidate's p-value;
+   the worst (largest) p-value seen across those single-sample drops must
+   still clear the same nominal significance bar used everywhere else.
+   Both the symmetry (any sample, not only treated) and the refit (the
+   shrinkage prior is re-estimated on the data actually being analyzed
+   each time, not reused from the full-sample fit) matter: a robustness
+   check that only ever drops treated samples, or that silently reuses a
+   stale full-sample moderation estimate, is not actually testing what it
+   claims to. A candidate whose apparent replication only holds because
+   of one or two individual samples is not a real replicated effect,
+   however clean and consistent its headline fold-changes look.
 4. More than one gene can pass the replication-plus-robustness bar --
    real biological effects are not required to be identical in magnitude
    across cohorts, and moderate heterogeneity (stronger in one cohort,
@@ -256,13 +259,13 @@ what makes reconciling them a judgment call rather than a lookup.
    evidence is concentrated in one cohort (look for other genes that move
    together with it, confined to that same cohort -- a latent technical
    axis, not biology).
-8. For any candidate that clears step 7, check robustness: within the
-   cohort where its evidence is weakest, drop each treated sample once and
-   recompute the p-value against the full control group. If the worst
-   (largest) p-value seen across those single-sample drops no longer
-   clears the same significance bar the full-sample result did, the
-   apparent replication is not real -- it is being carried by one or two
-   samples, not the treated group as a whole.
+8. For any candidate that clears step 7, check robustness: within each
+   cohort, drop each individual sample once -- control or treated -- refit
+   the moderated-variance prior on the reduced sample set, and recompute
+   the p-value. If the worst (largest) p-value seen across those
+   single-sample drops no longer clears the same significance bar the
+   full-sample result did, the apparent replication is not real -- it is
+   being carried by one or two samples, not the treated group as a whole.
 9. For any candidate that clears step 8, re-rank using MODERATED combined
    evidence rather than raw: fit an empirical-Bayes prior (degrees of
    freedom and typical variance) from every candidate's own pooled
@@ -313,12 +316,14 @@ actual numbers:
   apparent strength happens to rest on an anomalously small realized
   variance in one cohort.
 - Preferring the most cross-cohort-consistent gene over the one with
-  materially stronger evidence (and never checking robustness or variance
-  stability) names a gene that looks genuinely replicating on the
-  surface -- its cohort1 and cohort2 fold-changes are far more consistent
-  than the correct answer's -- but whose cohort2 significance turns out to
-  depend on one or two individual samples rather than the treated group as
-  a whole; wrong on every numeric field.
+  materially stronger evidence (and never checking moderated combined
+  evidence) names a gene that looks genuinely replicating on the surface --
+  its cohort1 and cohort2 fold-changes are far more consistent than the
+  correct answer's, and (as of round 8) it does clear symmetric leave-one-
+  out robustness -- but whose combined evidence, once variance is properly
+  moderated, is measurably weaker than the correct answer's; consistency
+  and robustness alone are not the same claim as "strongest supported,"
+  and this candidate is wrong on every numeric field.
 - Admitting a candidate as "replicated" on significance alone, without
   checking that both cohorts agree on effect direction, wrongly folds the
   technical artifact (and the real-but-sign-reversing heterogeneous gene)
@@ -333,11 +338,14 @@ actual numbers:
 
 All are visibly different from the locked reference values on at least one
 checked field, and each fails for a different underlying reason. The
-moderated-variance tiebreak was independently validated against real
-limma-voom, edgeR's quasi-likelihood pipeline, and DESeq2 -- each
-estimating its own moderation strength from the data, none given any
-generator-known parameter -- and all three agree with the conclusion this
-task's own (self-calibrating, no hand-picked prior weight) reimplementation
-reaches. See task/README.md's "Round 7" section for the full comparison and
-numbers, and "Round 6" for the leave-one-out robustness mechanism this
-builds on.
+moderated-variance tiebreak, and the symmetric (any-sample, moderation-
+refit) robustness check described in step 3/8 above, were both
+independently validated against real limma-voom, edgeR's quasi-likelihood
+pipeline, and DESeq2 -- each estimating its own moderation strength from
+the data, none given any generator-known parameter -- and all three agree
+with the conclusion this task's own (self-calibrating, no hand-picked
+prior weight) reimplementation reaches. See task/README.md's "Round 8"
+section for the full comparison and numbers behind the symmetric-LOO
+robustness definition and the 0.90->0.95 calibration it required, "Round
+7"/"Round 7b" for the moderated-variance tiebreak this builds on, and
+"Round 6" for the original leave-one-out robustness concept.

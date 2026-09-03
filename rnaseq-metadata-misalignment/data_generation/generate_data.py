@@ -15,7 +15,21 @@ Ground truth (never exposed via file/column names in the public data):
     can be discarded wholesale -- this is legitimate effect-size
     heterogeneity, not "null in one cohort." As of round 7 its own headline
     effect is deliberately modest (log2fc_c1=1.3, not a landslide winner
-    against VARIANCE_DECOY_GENE on raw/unmoderated evidence).
+    against VARIANCE_DECOY_GENE on raw/unmoderated evidence). Round 8
+    raised log2fc_c2 from 0.9 to 0.95 -- a real oracle-validity defect, not
+    a difficulty tweak: under a real, symmetric (any single sample, not
+    only treated) leave-one-out robustness check with the moderation prior
+    refit on each reduced sample set, TRUE_GENE's original cohort2
+    evidence (raw p~0.0067) was too thin to survive losing any one of its
+    two lowest-expression control samples, confirmed independently by
+    limma-voom, edgeR-QL, and DESeq2, not just this task's own moment
+    estimator. See cohort_symmetric_worst_case_loo_p below and
+    task/README.md's "Round 8" section for the full numeric case,
+    including the numerical search that confirmed 0.95 is the *lowest*
+    value that is both genuinely robust and still requires the moderated-
+    variance distinction -- at 0.975 and above, a "replicate + symmetric
+    LOO robust, rank by raw evidence" workflow that never touches
+    moderation already recovers TRUE_GENE on its own.
   - VARIANCE_DECOY_GENE (round 7, recalibrated round 7b) is mechanically
     an entirely ordinary gene: the same generative model as TRUE_GENE
     (baseline=500, sigma=0.25, a real, uniform condition effect in both
@@ -295,7 +309,7 @@ def latent_z_by_sample(metadata: pd.DataFrame) -> dict[str, float]:
 # fixed panel position, and the actual gene symbol shipped there is
 # whatever make_gene_symbols already generated at that position.
 DESIGNED_GENES = {
-    "TRUE_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.3, "log2fc_c2": 0.9, "z_loading": 0.0},
+    "TRUE_GENE": {"baseline": 500.0, "sigma": 0.25, "log2fc_c1": 1.3, "log2fc_c2": 0.95, "z_loading": 0.0},
     "CONFOUND_GENE": {"baseline": 400.0, "sigma": 0.25, "log2fc_c1": 0.0, "log2fc_c2": 0.0, "z_loading": 2.5},
     "CONSISTENCY_GENE": {"baseline": 350.0, "sigma": 0.18, "log2fc_c1": 1.2, "log2fc_c2": 0.65, "z_loading": 0.0},
     "GHOST_REPLICATOR": {"baseline": 300.0, "sigma": 0.28, "log2fc_c1": 0.42, "log2fc_c2": 0.42, "z_loading": 0.8},
@@ -426,40 +440,60 @@ def fisher_combined_p(p1: float, p2: float) -> float:
 NOMINAL_P_THRESHOLD = 0.05
 
 
-def cohort_treated_worst_case_loo_p(
+def cohort_symmetric_worst_case_loo_p(
     counts_df: pd.DataFrame, metadata: pd.DataFrame, cohort: str, gene: str
 ) -> float:
-    """Robustness check: within one cohort, drop each treated sample once
-    (leave-one-out), recompute the gene's Welch p-value against the full
-    control group each time, and return the WORST (largest) p-value seen.
+    """Robustness check: within one cohort, drop each individual sample once
+    -- control or treated, not only treated -- refit the moderated-variance
+    prior (fit_ebayes_prior) on that reduced sample set, recompute the
+    gene's moderated p-value against the remaining samples, and return the
+    WORST (largest) p-value seen across all single-sample drops.
 
-    This reuses the same NOMINAL_P_THRESHOLD already used for the ordinary
-    significance check -- a candidate's cohort-level significance has to
-    survive removing its single most favorable treated sample, not clear a
-    second, independently invented cutoff. A real, broadly-shared
-    treatment effect should not depend on any one sample; a candidate
-    whose apparent significance evaporates when its most influential
-    sample is removed is not the same scientific claim as one whose
-    significance is robust to that removal, regardless of how either
-    looks with all samples included.
+    Both the symmetry (any sample, not only treated) and the refit (the
+    shrinkage prior is re-estimated on the actual reduced dataset being
+    analyzed, not reused from the full-sample fit) are required for this to
+    be a genuine robustness claim: a candidate's apparent evidence should
+    not depend on any one sample being present, and a robustness check that
+    only ever removes treated samples, or that reuses a stale full-sample
+    moderation estimate while claiming to test a smaller one, is not
+    actually testing what it claims to. This reuses the same
+    NOMINAL_P_THRESHOLD already used for the ordinary significance check --
+    a candidate's cohort-level significance has to survive removing its
+    single most favorable sample, not clear a second, independently
+    invented cutoff.
     """
     ids = metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
     condition = metadata.set_index("sample_id").loc[ids, "condition"]
-    control_ids = [sid for sid in ids if condition[sid] == "control"]
-    treated_ids = [sid for sid in ids if condition[sid] == "treated"]
-
-    counts = counts_df[ids]
-    log2cpm = pipeline_stats.compute_log2_cpm(counts)
-    control_vals = log2cpm.loc[gene, control_ids].to_numpy()
 
     worst_p = 0.0
-    for drop in treated_ids:
-        remaining = [sid for sid in treated_ids if sid != drop]
-        treated_vals = log2cpm.loc[gene, remaining].to_numpy()
+    for drop in ids:
+        remaining = [sid for sid in ids if sid != drop]
+        control_ids = [sid for sid in remaining if condition[sid] == "control"]
+        treated_ids = [sid for sid in remaining if condition[sid] == "treated"]
+        n1, n2 = len(control_ids), len(treated_ids)
+        df_g = n1 + n2 - 2
+
+        log2cpm = pipeline_stats.compute_log2_cpm(counts_df[remaining])
+        var_c = log2cpm[control_ids].var(axis=1, ddof=1)
+        var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
+        pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
+
+        d0, s0_sq = fit_ebayes_prior(pooled_var.to_numpy(), df_g)
+        if np.isinf(d0):
+            mod_var = s0_sq
+            mod_df = 1e6
+        else:
+            mod_var = (d0 * s0_sq + df_g * float(pooled_var[gene])) / (d0 + df_g)
+            mod_df = d0 + df_g
+
+        mean_diff = float(log2cpm.loc[gene, treated_ids].mean() - log2cpm.loc[gene, control_ids].mean())
+        se = float(np.sqrt(mod_var * (1.0 / n1 + 1.0 / n2)))
+
         from scipy import stats as scipy_stats
 
-        _, p = scipy_stats.ttest_ind(treated_vals, control_vals, equal_var=False)
-        worst_p = max(worst_p, float(p))
+        t_mod = mean_diff / se
+        p = float(2.0 * scipy_stats.t.sf(abs(t_mod), df=mod_df))
+        worst_p = max(worst_p, p)
     return worst_p
 
 
@@ -577,13 +611,24 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
        meta-analysis at k=2) does not mechanically punish a gene's own
        legitimate cross-cohort heterogeneity.
     4. That significance must also be ROBUST: it has to survive removing
-       any single treated sample from that cohort (see
-       cohort_treated_worst_case_loo_p), not just hold with all samples
-       included. This is what separates TRUE_GENE (weaker-looking but
-       broadly-supported cohort2 evidence) from CONSISTENCY_GENE (a
-       cohort2 result that looks as strong or stronger, but is carried
-       disproportionately by two samples and evaporates if either is
-       removed) -- round 6's fragile-vs-robust-replication distinction.
+       any single sample from that cohort -- control or treated, not only
+       treated -- with the moderation prior refit on the reduced sample
+       set each time (see cohort_symmetric_worst_case_loo_p), not just
+       hold with all samples included or with a stale full-sample
+       moderation estimate reused. Round 6 introduced this as a raw,
+       treated-only check to catch CONSISTENCY_GENE's fragile replication
+       (a cohort2 result carried disproportionately by two treated
+       samples); round 8 found that check too narrow to be a genuine
+       robustness claim -- both CONSISTENCY_GENE and (originally)
+       TRUE_GENE itself can look "robust" under a treated-only, non-refit
+       version while TRUE_GENE's real cohort2 evidence was still fragile
+       to losing a single control sample. The symmetric, refit version is
+       what actually separates a genuinely broadly-supported result from
+       one that only looks that way under a narrower check.
+    4b. This means more than one candidate can now clear the robustness
+       bar (CONSISTENCY_GENE among them) without being the final answer --
+       that is expected and correct; step 5's moderated combined-evidence
+       comparison is what does the final discriminating.
     5. Among genes that clear that bar, prefer the one with the stronger
        combined evidence -- but "stronger" is evaluated on MODERATED
        per-cohort p-values (empirical-Bayes shrunk variance, prior
@@ -612,8 +657,8 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
         both_nominal = r1["p_value"] < NOMINAL_P_THRESHOLD and r2["p_value"] < NOMINAL_P_THRESHOLD
         if not (same_sign and both_nominal):
             continue
-        c1_robust = cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
-        c2_robust = cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
+        c1_robust = cohort_symmetric_worst_case_loo_p(counts_df, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
+        c2_robust = cohort_symmetric_worst_case_loo_p(counts_df, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
         if c1_robust and c2_robust:
             combined_p = moderated_combined_p(counts_df, metadata, gene)
             replicated.append((gene, combined_p, r1, r2))
@@ -637,8 +682,8 @@ def lock_ground_truth(counts_df: pd.DataFrame, metadata: pd.DataFrame) -> dict:
         same_sign = np.sign(r1g["log2_fold_change"]) == np.sign(r2g["log2_fold_change"])
         both_nominal = r1g["p_value"] < NOMINAL_P_THRESHOLD and r2g["p_value"] < NOMINAL_P_THRESHOLD
         both_robust = both_nominal and (
-            cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
-            and cohort_treated_worst_case_loo_p(counts_df, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
+            cohort_symmetric_worst_case_loo_p(counts_df, metadata, "cohort1", gene) < NOMINAL_P_THRESHOLD
+            and cohort_symmetric_worst_case_loo_p(counts_df, metadata, "cohort2", gene) < NOMINAL_P_THRESHOLD
         )
         if same_sign and both_robust:
             continue
