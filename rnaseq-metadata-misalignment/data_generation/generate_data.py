@@ -397,6 +397,33 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
     return counts_df, DESIGNED_POSITIONS, designed_gene_symbols
 
 
+def neutralize_gene_symbols(
+    counts_df: pd.DataFrame, designed_gene_symbols: dict[str, str]
+) -> tuple[pd.DataFrame, dict[str, str], dict[str, str]]:
+    """Replace the internal, biologically-suggestive panel symbols (used
+    only as seed input inside simulate_counts, so their specific text never
+    affects any simulated count) with neutral sequential IDs
+    (GENE_001..GENE_300) before anything is written to disk or exposed to
+    an agent. This is a pure relabeling applied AFTER all counts are
+    already simulated, not a resimulation: every count value is identical,
+    only the row labels change. The pre-neutralization symbols were built
+    from a generic list of realistic-looking human gene-name prefixes
+    (RPS, CACNA, PSMB, TMEM, ...) purely so the panel wouldn't look like a
+    list of literal placeholders -- they carried no biological meaning
+    anywhere in this generator, no gene-set/pathway annotation exists for
+    any of them, and letting an agent (or an author) read real biology
+    into a prefix like "RPS" was itself a design flaw, independent of any
+    statistical calibration. Returns the renamed counts_df, the renamed
+    label->symbol mapping, and the full old->new mapping for audit.
+    """
+    old_symbols = list(counts_df.index)
+    new_ids = [f"GENE_{i + 1:03d}" for i in range(len(old_symbols))]
+    old_to_new = dict(zip(old_symbols, new_ids))
+    renamed_counts = counts_df.set_axis(new_ids, axis=0)
+    renamed_designed = {label: old_to_new[sym] for label, sym in designed_gene_symbols.items()}
+    return renamed_counts, renamed_designed, old_to_new
+
+
 def cohort_sample_ids(metadata: pd.DataFrame, cohort: str) -> list[str]:
     return metadata.loc[metadata["cohort"] == cohort, "sample_id"].tolist()
 
@@ -756,6 +783,9 @@ def main() -> None:
 
     metadata = build_sample_roster()
     counts_df, designed_positions, designed_gene_symbols = simulate_counts(metadata, gene_symbols, rng)
+    counts_df, designed_gene_symbols, old_to_new_symbols = neutralize_gene_symbols(
+        counts_df, designed_gene_symbols
+    )
 
     acq_rng = np.random.default_rng(stable_seed("acquisition-order"))
     acq_order = acquisition_order(metadata["sample_id"].tolist(), acq_rng)
@@ -775,6 +805,12 @@ def main() -> None:
     ground_truth["designed_gene_positions"] = designed_positions
     ground_truth["designed_gene_symbols"] = designed_gene_symbols
     (private_dir / "ground_truth.json").write_text(json.dumps(ground_truth, indent=2))
+
+    # Audit-only: the full old (biologically-suggestive) -> new (neutral)
+    # symbol mapping, authoring-only, never shipped to the agent.
+    (private_dir / "gene_symbol_rename_map.json").write_text(
+        json.dumps(old_to_new_symbols, indent=2)
+    )
 
     print("Generated:")
     print(f"  public/sample_metadata.csv: {len(metadata)} rows")
