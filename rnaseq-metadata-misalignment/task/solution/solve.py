@@ -97,6 +97,38 @@ from pipeline import stats as pipeline_stats  # noqa: E402
 NOMINAL_P_THRESHOLD = 0.05
 
 
+def compute_log2_median_ratio(counts_by_sample: pd.DataFrame) -> pd.DataFrame:
+    """Composition-aware normalization (Anders & Huber 2010's median-of-
+    ratios, the same normalization DESeq2 uses internally): each sample's
+    size factor is the median, across genes with a positive count in every
+    sample of the given subset, of that gene's count divided by its
+    geometric mean across those samples.
+
+    The supplied pipeline's own normalization (pipeline/stats.py's
+    compute_log2_cpm, plain total-count CPM) assumes a sample's total
+    library size is a neutral scaling artifact -- true only when the genes
+    that actually change are a small share of total counts. Once per-cohort
+    analysis (see below) turns up evidence of broad, coordinated
+    transcriptional change rather than a single isolated hit, that
+    assumption itself needs re-examining: a normalization method whose
+    reference point moves along with the treatment effect biases every
+    other gene's apparent fold-change in the same direction. Median-of-
+    ratios is not sensitive to that in the same way, because a shift
+    concentrated in a subset of genes does not move every other gene's
+    normalized value along with it.
+    """
+    positive_only = counts_by_sample.where(counts_by_sample > 0)
+    log_counts = np.log(positive_only)
+    log_geo_mean = log_counts.mean(axis=1)
+    valid_genes = np.isfinite(log_geo_mean)
+    log_ratios = log_counts.loc[valid_genes].sub(log_geo_mean[valid_genes], axis=0)
+    log_size_factors = log_ratios.median(axis=0)
+    size_factors = np.exp(log_size_factors)
+    size_factors = size_factors / np.exp(np.log(size_factors).mean())
+    normalized = counts_by_sample.div(size_factors, axis=1)
+    return np.log2(normalized + 1.0)
+
+
 def differential_expression_for_cohort(
     expr: pd.DataFrame, metadata: pd.DataFrame, cohort: str
 ) -> pd.DataFrame:
@@ -111,7 +143,7 @@ def differential_expression_for_cohort(
     condition = pd.Series(
         metadata.set_index("sample_id").loc[ids, "condition"].to_numpy(), index=ids
     )
-    log2cpm = pipeline_stats.compute_log2_cpm(counts)
+    log2cpm = compute_log2_median_ratio(counts)
     de_table = pipeline_stats.differential_expression(log2cpm, condition)
     return de_table.sort_values("adjusted_p_value")
 
@@ -147,7 +179,7 @@ def cohort_symmetric_worst_case_loo_p(
         n1, n2 = len(control_ids), len(treated_ids)
         df_g = n1 + n2 - 2
 
-        log2cpm = pipeline_stats.compute_log2_cpm(expr[remaining])
+        log2cpm = compute_log2_median_ratio(expr[remaining])
         var_c = log2cpm[control_ids].var(axis=1, ddof=1)
         var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
         pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
@@ -215,7 +247,7 @@ def cohort_moderated_p_value(expr: pd.DataFrame, metadata: pd.DataFrame, cohort:
     n1, n2 = len(control_ids), len(treated_ids)
     df_g = n1 + n2 - 2
 
-    log2cpm = pipeline_stats.compute_log2_cpm(expr[ids])
+    log2cpm = compute_log2_median_ratio(expr[ids])
     var_c = log2cpm[control_ids].var(axis=1, ddof=1)
     var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
     pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
@@ -371,9 +403,8 @@ def main() -> None:
         f"heterogeneity between cohorts is real but moderate "
         f"({heterogeneity_assessment}), not a sign flip or a null cohort. "
         f"{rejected_competing_gene} was rejected: {rejection_detail} -- "
-        f"naive pooled DE and a sign-blind combined-p meta-analysis are "
-        f"both misled by that gene's outsized single-cohort effect, and "
-        f"cohort2-trusting-alone reports it outright as the top hit. A "
+        f"cohort2-trusting-alone reports it outright as the top hit, on "
+        f"the strength of that same outsized, single-cohort effect. A "
         f"prior pilot report on file describes an earlier, underpowered, "
         f"single-cohort finding without giving enough detail to confirm or "
         f"rule out any specific gene, and predates the confirmatory "

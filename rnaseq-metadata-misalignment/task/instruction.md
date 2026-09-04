@@ -2,13 +2,15 @@
 
 A scientist is analyzing RNA-seq data to identify a gene associated with treatment across two independent cohorts.
 
-An existing differential-expression pipeline has previously been used for this analysis, but the results are no longer reproducing the findings that were expected. The goal is to investigate the existing analysis, make any necessary corrections, and identify the treatment-associated gene that is best supported by the data.
+An existing differential-expression pipeline has previously been used for this analysis, but the results are no longer reproducing the findings that were expected. The goal is to investigate the existing analysis, make any necessary corrections, and identify the treatment-associated gene that is best supported by the data. The supplied pipeline may have more than one issue affecting the validity of its results, not only how samples are matched to their metadata, and any analysis choice made along the way should be justified by what the data itself actually shows rather than by what the pipeline happens to do by default.
 
 The data are available in `/workspace/data/`.
 
 `/workspace/data/expression_matrix.csv` contains raw RNA-seq counts for 300 genes across 24 samples.
 
 `/workspace/data/sample_metadata.csv` contains the corresponding sample information, including treatment group, cohort, and available QC information.
+
+`/workspace/data/gene_modules.csv` lists a pathway/module annotation available for a subset of the panel (some genes belong to more than one). It is provided as-is, with no guidance on whether or how it is relevant to this analysis.
 
 Additional historical or pilot material may be present in the repository and can be used for context, but previous results should not be assumed to be correct.
 

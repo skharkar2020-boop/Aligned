@@ -64,11 +64,19 @@ of handling the two cohorts each name a different top gene:
 - **A sign-blind combined-p meta-analysis** (a real, common mistake:
   plugging each candidate gene's two independent cohort-level p-values
   into Fisher's method without first checking that the two cohorts agree
-  on effect *direction*): the method itself never checked whether the two
-  cohorts were telling the same story, and on this dataset that omission
-  is costly -- combined with never checking variance stability either, it
-  lands on the round-7 variance-fragile decoy (see below), not the
-  strongest generalizable candidate.
+  on effect *direction*) and **checking nominal significance in both
+  cohorts without checking sign agreement** are both real methodological
+  gaps -- a sound analysis still has to check direction explicitly, not
+  just significance -- but as of round 9 (module layer + composition-aware
+  normalization), neither one actually diverges from the correct answer on
+  the *locked* dataset: the confounded gene's own cohort1 result (p=0.0505)
+  no longer quite clears nominal significance even without a sign check,
+  so it is not available for either shortcut to mistakenly admit. This is
+  a genuine, checked fact about the current calibration, not an oversight
+  -- see task/README.md's "Round 9" section. Both gaps are still worth
+  understanding and are still exercised by the module-layer competitor and
+  the CPM-normalization scenarios below, just not by this specific
+  mechanism any more.
 - **Trusting the full, otherwise-correct per-cohort replication workflow**
   (ID-based alignment, per-cohort DE, same-sign nominal significance in
   both cohorts, leave-one-out robustness, preferring the strongest RAW
@@ -77,25 +85,45 @@ of handling the two cohorts each name a different top gene:
   entirely ordinary hit -- the same generative process as the strongest
   candidate (same baseline expression level, same true underlying
   variability), differing only in which natural random draw it happened
-  to land on -- and clears every one of those checks more convincingly:
-  BH-significant in both cohorts (the correct answer is BH-significant
-  only in cohort1), a more consistent effect size across cohorts, and
-  stronger raw combined evidence. The reason is that its own within-group
-  sample variance in one cohort happened, purely by chance, to come out
-  anomalously small: with only 6 samples per group (5 residual degrees of
-  freedom), a single gene's own variance estimate is itself a noisy
-  quantity, and an unusually small realized variance inflates the
-  apparent significance of an otherwise-ordinary effect. This is a
-  genuinely different failure from the others in this list: it is not a
-  missing check for sign, significance, or leave-one-out robustness -- it
-  is a completely correct execution of the full replication procedure
-  that still reaches the wrong answer, because that procedure alone never
-  asks whether a candidate's own apparent strength is an artifact of a
-  favorable small-sample variance estimate.
-- **Checking nominal significance in both cohorts without checking sign
-  agreement**: admits the confounded gene as "replicated" on the strength
-  of its now-nominally-significant cohort1 p-value alone, missing that the
-  sign is reversed from its overwhelming cohort2 effect.
+  to land on -- and, on the pre-round-9 dataset, cleared every one of
+  those checks more convincingly on raw evidence than the correct answer
+  did, because its own within-group sample variance in one cohort
+  happened, purely by chance, to come out anomalously small (round 7/7b).
+  As of round 9, this specific candidate no longer beats the correct
+  answer on *raw* combined evidence either -- the module layer's
+  composition effects moved the surrounding numbers enough that ranking by
+  raw (non-moderated) combined evidence among gate-survivors also now
+  recovers the correct answer directly (checked on the locked dataset; see
+  task/README.md's "Round 9" section). Moderated variance is still the
+  scientifically correct choice, and still measurably reduces this
+  candidate's apparent advantage when it is applied (its raw combined
+  evidence gets *weaker*, not stronger, once shrunk toward the panel's
+  typical variance) -- it is no longer the single mechanism that
+  determines the winner between this candidate and the correct answer,
+  now that other checks (module-scale composition awareness, the
+  module-layer competitor's own comparison) also constrain the answer.
+  This was an explicit, considered decision, not an unnoticed regression:
+  forcing this specific candidate to keep beating the correct answer on
+  raw evidence would mean re-tuning it against the round-9 backdrop
+  purely to preserve an older failure mode, which is backwards -- the
+  benchmark's difficulty is now expected to come from the combined chain
+  of checks (alignment, cohort separation, composition-aware
+  normalization, moderated inference, replication/robustness, optional
+  module-specificity reasoning) rather than from any one candidate's
+  pairwise ranking being individually load-bearing.
+- **Running the complete, otherwise-correct replication-plus-robustness-
+  plus-moderation procedure but leaving the supplied pipeline's own
+  total-count CPM normalization in place** (rather than switching to a
+  composition-aware method once the module-scale response is apparent):
+  promotes a different gene, one of the module-layer's own real,
+  replicated, robust background responders (see the module-layer
+  competitor discussion below). Naming that competitor as suspicious in a
+  written rationale is not sufficient by itself -- CPM's own reference
+  point moves along with the module layer's broad response, which
+  specifically dampens TRUE_GENE's own apparent evidence relative to
+  everything else on the panel, so the underlying per-gene statistics
+  still have to come from a normalization that is not itself biased by
+  the very pattern being reasoned about.
 - **Flagging any gene with a dramatic, cohort-specific difference as a
   technical artifact by default**: a second gene exists that is
   independently significant in *each* cohort alone but with opposite
@@ -111,10 +139,50 @@ None of these are coding errors -- each is a real, internally consistent,
 non-crashing statistical analysis of correctly-ID-aligned data. That is
 what makes reconciling them a judgment call rather than a lookup.
 
+One further gene deserves separate mention here rather than being folded
+into the "wrong strategies" list above, because it is not a wrong-strategy
+artifact at all: a real, module-scale background responder (see
+`gene_modules.csv`) that is same-signed, nominally significant in both
+cohorts, and robust to the same leave-one-out check as everything else --
+sitting in a module where roughly a quarter of the other members
+independently show the same kind of broad, non-specific activity, unlike
+TRUE_GENE's own module, where it is essentially the only responder. It is
+not eliminated by the same-sign, significance, or robustness checks; it
+loses because TRUE_GENE's own combined evidence (moderated, cross-cohort)
+is stronger, by a comfortable margin under median-of-ratios normalization
+and confirmed independently under limma-voom/TMM and edgeR-QL/TMM (see
+task/README.md's "Round 9" section) -- not by a package-specific numerical
+coincidence. Its own module's high hit-rate is useful corroborating
+context for why it is the less specific signal, not a required or scored
+part of the resolution.
+
 ## The correct resolution
 
-1. Run the same per-gene DE procedure (log2-CPM, Welch's t-test, BH-FDR)
-   independently within `cohort1` and within `cohort2`. Never pool.
+1. Run the same per-gene DE procedure (Welch's t-test, BH-FDR, on
+   properly-normalized expression -- see step 1b) independently within
+   `cohort1` and within `cohort2`. Never pool.
+
+1b. A substantial, broadly-distributed share of the 300-gene panel carries
+   a real, module-scale treatment response (see `gene_modules.csv`), not
+   one isolated hit. Once that much of the panel is genuinely responding,
+   the supplied pipeline's own normalization (`pipeline/stats.py`'s
+   `compute_log2_cpm`, total-count CPM) is no longer a neutral choice: its
+   own reference point (each sample's total read count) shifts along with
+   the treatment effect, which biases every other gene's apparent
+   fold-change in the same direction -- including TRUE_GENE's own. The
+   reference solution uses median-of-ratios normalization (Anders & Huber
+   2010, the same size-factor method DESeq2 uses internally) instead:
+   each sample's size factor is the median, across genes with a positive
+   count in every sample, of that gene's count divided by its geometric
+   mean across samples. This was validated against real DESeq2's own
+   `estimateSizeFactors` on the locked dataset (size factors agree to
+   <0.3%) and the resulting candidate ranking cross-checked against real
+   limma-voom and edgeR's quasi-likelihood pipeline, both TMM-normalized
+   (see task/README.md's "Round 9" section) -- none of the three need to
+   compute numerically identical size factors to agree on the winner.
+   Median-of-ratios is not the only acceptable choice; some
+   composition-aware normalization is necessary, plain total-count CPM
+   is not sufficient, once the data itself shows this pattern.
 2. For any gene near the top of either cohort's own ranking, require BOTH
    that it show a *nominally* significant (raw p < 0.05, not
    BH-re-adjusted within cohort2) effect independently in the **other**
@@ -253,6 +321,14 @@ what makes reconciling them a judgment call rather than a lookup.
 6. Notice the `cohort` column and split the analysis by cohort instead of
    pooling. Run the same DE procedure independently within `cohort1` and
    within `cohort2`.
+6b. Notice that a large, broadly-distributed share of the panel (see
+   `gene_modules.csv`) shows real, nominally significant, same-signed
+   activity in both cohorts, not just the one or two candidates being
+   scrutinized -- a pattern total-count CPM does not handle neutrally,
+   since its own reference point (each sample's total read count) shifts
+   along with that broad response. Switch to a composition-aware
+   normalization (e.g. median-of-ratios, DESeq2's own method) before
+   trusting any candidate's fold-change or significance from here on.
 7. For each cohort's own top candidates, check whether they hold up
    (nominal significance, same sign) in the *other* cohort. Reject
    whichever prominent candidate fails that check, and identify why its
@@ -300,41 +376,54 @@ internal check that the verifier would actually catch them, none of which
 crash or produce a NaN -- see task/README.md's calibration table for the
 actual numbers:
 
-- Naive pooled DE and a sign-blind combined-p meta-analysis both name the
-  round-7 variance-fragile decoy outright -- not merely a contaminated
-  estimate of the strongest generalizable candidate, a completely
-  different gene.
-- Trusting `cohort2` alone names a different gene entirely, with
-  everything about it (fold-changes, heterogeneity label, rejected gene)
-  wrong; its own cohort1 result is now nominally significant but
-  wrong-signed.
-- Running the complete, otherwise-correct replication procedure
-  (alignment, per-cohort DE, same-sign nominal significance, leave-one-out
-  robustness, prefer strongest RAW combined evidence) without also
-  checking variance stability also lands on the variance-fragile decoy:
-  it clears every one of those checks more convincingly, because its
-  apparent strength happens to rest on an anomalously small realized
-  variance in one cohort.
-- Preferring the most cross-cohort-consistent gene over the one with
-  materially stronger evidence (and never checking moderated combined
-  evidence) names a gene that looks genuinely replicating on the surface --
-  its cohort1 and cohort2 fold-changes are far more consistent than the
-  correct answer's, and (as of round 8) it does clear symmetric leave-one-
-  out robustness -- but whose combined evidence, once variance is properly
-  moderated, is measurably weaker than the correct answer's; consistency
-  and robustness alone are not the same claim as "strongest supported,"
-  and this candidate is wrong on every numeric field.
-- Admitting a candidate as "replicated" on significance alone, without
-  checking that both cohorts agree on effect direction, wrongly folds the
-  technical artifact (and the real-but-sign-reversing heterogeneous gene)
-  into the replicated pool; on this locked dataset the reported top gene
-  is wrong too (it still lands on the variance-fragile decoy), and
-  `rejected_competing_gene` is separately wrong because neither
-  reversed-sign gene remains available to report there.
+- Naive pooled DE names the round-7 variance-fragile decoy outright -- not
+  merely a contaminated estimate of the strongest generalizable candidate,
+  a completely different gene.
+- Trusting `cohort2` alone names a different gene entirely (the technical
+  artifact), with everything about it (fold-changes, heterogeneity label,
+  rejected gene) wrong.
+- Leaving the supplied pipeline's own total-count CPM normalization in
+  place, rather than switching to a composition-aware method, while
+  otherwise running the complete, correct procedure, names the round-9
+  module-layer competitor -- a real, replicated, robust background
+  responder whose own module shows unusually broad, non-specific activity;
+  CPM's own reference point moves along with that broad module-scale
+  response, which specifically dampens the correct candidate's own
+  apparent evidence enough to flip the ranking.
+- Preferring the most cross-cohort-consistent gene among gate-survivors
+  over the one with materially stronger combined evidence (never checking
+  moderated combined evidence at all) still names the round-6
+  fragile-replication decoy: its cohort1 and cohort2 fold-changes are far
+  more consistent with each other than the correct answer's own
+  (deliberately asymmetric) pair, and it does clear symmetric leave-one-out
+  robustness, but its combined evidence is measurably weaker than the
+  correct answer's once properly moderated; consistency and robustness
+  alone are not the same claim as "strongest supported."
 - Citing the real-but-sign-reversing heterogeneous gene as the rejected
   competitor (rather than the genuine technical artifact) is wrong even
   though excluding it from `top_gene` is correct -- its own single-cohort
   evidence is real but weaker than the actual technical artifact's.
+
+As of round 9 (module layer + composition-aware normalization), two
+scenarios that used to independently diverge from the correct answer no
+longer do on the locked dataset, and this is a deliberate, checked
+acceptance rather than an oversight: a sign-blind combined-p meta-analysis,
+and running the complete replication-plus-robustness procedure but ranking
+survivors by RAW rather than moderated combined evidence. Both now recover
+the correct top gene directly on this dataset -- the technical artifact's
+own cohort1 result (p=0.0505) no longer quite clears nominal significance
+even without a sign check, and the round-9 composition effects moved the
+raw-combined-evidence ordering among gate-survivors enough that moderation
+no longer needs to flip the winner between the correct answer and the
+round-7 variance-fragile decoy, only to (still correctly) widen the margin
+between them. Moderated, composition-aware, cross-cohort-replicated
+reasoning remains the scientifically correct and fully-used procedure; it
+is simply no longer the sole mechanism standing between the agent and the
+right answer, now that the module layer and normalization choice
+contribute their own, independent constraints. See task/README.md's
+"Round 9" section for the full numeric comparison and the explicit
+decision not to re-tune any candidate purely to keep an older
+single-mechanism trap load-bearing.
 
 All are visibly different from the locked reference values on at least one
 checked field, and each fails for a different underlying reason. The

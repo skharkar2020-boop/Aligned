@@ -1031,3 +1031,262 @@ robustness gate too) as `top_gene` all re-verified to fail the verifier
 final committed files reproduced the same five-gene frontier and the same
 12-policy-table results reported above -- confirmed against the actual
 shipped `generate_data.py` functions, not a scratch reimplementation.
+
+## Round 9: module-layer annotation, composition-aware normalization
+
+**Motivation.** Round 9a replaced every synthetic gene symbol with a
+neutral ID (`GENE_001`..`GENE_300`) because biologically-suggestive
+placeholder names (`RPS114`, `CACNA619`, ...) created an avoidable
+semantic confound: an agent (or reviewer) could infer nonexistent biology
+from a name prefix like `RPS`, without the panel actually carrying any
+real gene-set annotation behind it. Round 9b addressed the same underlying
+concern from a different, more substantive angle: rather than relying on
+the *absence* of suggestive names, give the intended decoy gene
+(`GENE_120`/`VARIANCE_DECOY_GENE`) a genuine, independently-discoverable
+"broad, non-specific program" property -- a real module-membership
+annotation (`gene_modules.csv`) whose statistical texture, not its label,
+carries information.
+
+**Module architecture (frozen).** 12 modules (`MAPK_SIGNALING`,
+`ACTIN_REMODELING`, `TRANSLATION`, `CELL_CYCLE`, `INTERFERON_RESPONSE`,
+`OXIDATIVE_STRESS`, `METABOLIC_ADAPTATION`, `DNA_DAMAGE`,
+`DISEASE_SIGNALING_A/B`, `DISEASE_STATE_C`, `DISEASE_ADAPTATION_D`), sizes
+17-30, tagged "generic" or "disease" internally (never exposed). Module
+membership is assigned first, broadly and repeatedly across the panel,
+independent of any gene's later-drawn effect class. Each module then gets
+a mix of null/weak/moderate/cohort-specific/discordant background genes,
+with the mix (not any individual gene's own class) shifted by module type:
+generic modules carry a higher proportion of modest, replicated responders
+(the texture that makes `GENE_120`'s own module, `TRANSLATION`, a
+genuinely broad-response pathway); disease modules are mostly quiet with a
+handful of genuine responders (the texture that makes `GENE_138`'s own
+module, `DISEASE_ADAPTATION_D`, a mostly-quiet pathway where it is
+essentially the only responder). The five core designed genes
+(`TRUE_GENE`, `VARIANCE_DECOY_GENE`, `NEAR_MISS_GENE`, `CONSISTENCY_GENE`,
+`GHOST_REPLICATOR`) keep their already-locked own statistics; only their
+module tag(s) are added. Everything is seeded via `stable_seed`
+(deterministic, SHA256-based): regenerating repeatedly with the frozen
+architecture reproduces a byte-identical `expression_matrix.csv` and
+`gene_modules.csv`.
+
+**The composition effect (why plain CPM stopped being trustworthy).**
+~110 real-effect background genes were added by the module layer. Even
+after a one-time greedy sign-rebalancing pass (`_rebalance_module_effects`,
+minimizing net `|log2fc|` sum across all module effects to reduce -- not
+eliminate -- aggregate directional bias), adding this much real,
+broadly-distributed signal changes each sample's total library size in a
+way that is not neutral under total-count CPM: CPM's own reference point
+(the sample's total read count) shifts along with the treatment effect,
+which dampens or inflates every *other* gene's apparent fold-change in the
+same direction, including `TRUE_GENE`'s own. Diagnosed directly: at the
+already-locked `TRUE_GENE.log2fc_c2=0.95`, `TRUE_GENE`'s symmetric-LOO
+worst-case p-value under plain CPM degraded from round 8's validated 0.018
+to 0.070 (failing the 0.05 bar), while under limma-voom/TMM, edgeR-QL/TMM,
+and DESeq2/median-ratio it stayed comfortably robust (worst p 0.006-0.034)
+-- confirmed with real R packages, not just this task's own estimator. The
+composition effect is specific to plain total-count CPM, not a general
+degradation of `TRUE_GENE`'s own biology, and not explained by any single
+sample being unusually large or compositionally atypical (per-sample
+z-scores for library size, module-gene count share, TMM factor, and
+DESeq2 size factor are all within ~0.65σ of the cohort mean for every
+cohort2 sample, including the one whose removal produces the worst-case
+LOO result).
+
+**The design decision: Design 2, not Design 1.** Two ways to respond to
+this were considered. Design 1 keeps plain CPM as the canonical
+normalization and either shrinks the module layer to protect `TRUE_GENE`'s
+existing calibration, or pushes `TRUE_GENE`'s own effect size upward until
+it survives plain-CPM LOO despite the composition bias. Both were
+rejected: shrinking the module layer to preserve an old calibration is
+backwards (it tunes the biology to fit a stale answer rather than
+re-deriving the answer from the real, final dataset), and pushing
+`TRUE_GENE`'s effect upward specifically to survive a normalization
+artifact would be calibrating the biological truth around a measurement
+choice, not a scientific property of the data. Design 2 was chosen
+instead: keep `TRUE_GENE` at its already-locked, real-tool-validated 0.95
+(untouched), keep the module layer as generated (real, useful texture, not
+something to route around), and instead recognize that once broad,
+module-scale coordinated expression change is present, the *normalization
+step itself* has become part of the scientific problem -- a competent
+analyst has to notice that total-count CPM's neutrality assumption no
+longer holds and switch to a composition-aware method, the same reason
+TMM and median-of-ratios normalization exist in real RNA-seq practice.
+
+**Implementation: median-of-ratios, not a hidden requirement for one named
+package.** The task's Python-only agent sandbox (numpy/pandas/scipy only,
+no R) means an agent cannot literally run limma-voom/edgeR/DESeq2; the
+reference solution instead implements median-of-ratios normalization
+(Anders & Huber 2010, the same size-factor method DESeq2 uses internally)
+in pure Python -- `compute_log2_median_ratio` in
+`data_generation/generate_data.py`, `task/solution/solve.py`, and (an
+independently-written copy, per this repo's established pattern)
+`task/tests/test_outputs.py`. Validated against real DESeq2's own
+`estimateSizeFactors` on the locked dataset: computed size factors agree
+to <0.3% (a small, consistent offset, not a directional discrepancy).
+`instruction.md` does not name CPM, TMM, DESeq2, or median-of-ratios
+anywhere, does not say normalization is a problem, and does not point at
+compositional bias -- it only adds one neutral sentence ("the supplied
+pipeline may have more than one issue... any analysis choice should be
+justified by what the data itself actually shows") and a one-line mention
+of `gene_modules.csv`'s existence with no interpretation. The verifier
+does not grade normalization choice directly: there is no field for it,
+`LOG2FC_ABS_TOL` (0.2) and `ADJ_P_LOG10_TOL` (3.0 log10 units) are wide
+enough to absorb the numeric differences between median-of-ratios and TMM,
+and both real limma-voom/TMM and edgeR-QL/TMM independently reach the same
+substantive conclusion on this dataset as the shipped Python
+implementation, without needing to compute numerically identical size
+factors.
+
+**The frontier under the frozen module layer + Design 2, `TRUE_GENE`
+unchanged at 0.95.** Full candidate table (median-of-ratios normalization,
+locked dataset; `GENE_255` is the round-9 module-layer competitor,
+`ACTIN_REMODELING`, not a designed/core gene):
+
+| gene | role | c1 fc | c2 fc | c1 raw p | c2 raw p | c1 BH | c2 BH | same-dir | robust (LOO) | moderated combined p | own module | module nominal-frac |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `GENE_138` | `TRUE_GENE` | 1.619 | 0.666 | 1.9e-6 | 3.3e-3 | 5.8e-4 | 3.9e-2 | yes | yes | **1.56e-7 (winner)** | `DISEASE_ADAPTATION_D` | 0.095 (essentially only responder) |
+| `GENE_255` | round-9 module competitor | -1.312 | -1.151 | 7.8e-4 | 3.0e-3 | 2.3e-2 | 3.7e-2 | yes | yes | 4.84e-7 | `ACTIN_REMODELING` | 0.250 (broadly active module) |
+| `GENE_120` | `VARIANCE_DECOY_GENE` | 1.197 | 0.992 | 2.1e-4 | 1.1e-4 | 1.5e-2 | 8.3e-3 | yes | yes | 6.46e-7 | `TRANSLATION` | 0.167 (broadly active module) |
+| `GENE_035` | `NEAR_MISS_GENE` | 1.095 | 0.961 | 3.4e-4 | 7.3e-4 | 1.5e-2 | 1.8e-2 | yes | yes | 3.45e-6 | `DISEASE_SIGNALING_A` | 0.120 |
+| `GENE_034` | `GHOST_REPLICATOR` | 0.642 | 2.300 | 3.5e-2 | 3.0e-5 | 0.18 | 3.0e-3 | yes | **no** (c1 LOO 0.088) | 1.12e-8 (excluded) | `MAPK_SIGNALING` | 0.103 |
+| `GENE_154` | `CONFOUND_GENE` | -0.363 | 6.316 | 0.0505 | 3.6e-7 | 0.24 | 1.1e-4 | **no** | no | 4.13e-15 (excluded) | none | -- |
+| `GENE_062` | `SENTINEL_3` | 0.259 | 2.473 | 0.326 | 1.1e-6 | 0.63 | 1.6e-4 | yes | **no** (c1 not nominal) | 3.15e-9 (excluded) | none | -- |
+
+`GENE_138` wins among gate-survivors (same-direction + both-cohort-nominal
++ symmetric-LOO-robust) by a real margin: 3.1x stronger moderated combined
+p than `GENE_255`, 4.1x stronger than `GENE_120`, 22x stronger than
+`GENE_035`. Confirmed independently under all three real tools on the same
+locked dataset: `GENE_138` ranks first among gate-survivors under
+limma-voom/TMM (p=6.6e-8), edgeR-QL/TMM (p=7.2e-8), and DESeq2 (p=3.9e-15)
+-- `GENE_154`/`GENE_062`/`GENE_034` rank ahead of it on *raw*, ungated
+Fisher-combined p under all three tools too, exactly as intended, and are
+correctly excluded by the same gates real limma/edgeR/DESeq2 numbers
+confirm they fail (`GENE_034`'s worst-case symmetric LOO under real tools:
+voom 0.034, edgeR-QL 0.029, DESeq2 0.006 in cohort1 -- all above 0.05).
+
+**A specific, deliberate non-recalibration.** Building the frontier above
+surfaced that `TRUE_GENE` now beats `VARIANCE_DECOY_GENE` on *raw*
+(non-moderated) combined evidence too, not only on moderated evidence --
+under both plain CPM and median-of-ratios, on this exact module-active
+dataset (raw combined p: `GENE_138` 1.26e-7 vs. `GENE_120` 4.28e-7). This
+was not true at round 7b's original calibration; the round-9 module
+layer's own composition effects moved the surrounding numbers enough to
+close that specific gap. `VARIANCE_DECOY_GENE`'s own within-cohort
+variance ratio (cohort1 ~0.13 vs. cohort2 ~0.07, a real ~1.9x swing) is
+unchanged and still means moderation measurably *weakens* its apparent
+advantage when applied (moderated combined p 6.46e-7, worse than its own
+raw 4.28e-7) -- the scientific mechanism this candidate was built to
+demonstrate is still real and still exercised by the reference solution.
+It is simply no longer, by itself, the single mechanism that determines
+whether an agent reaches `TRUE_GENE`: an agent who skips moderation
+entirely but does everything else right (alignment, per-cohort split,
+composition-aware normalization, same-sign + nominal + symmetric-LOO
+gating) now reaches `TRUE_GENE` anyway on this dataset. The deliberate
+choice made here was **not** to re-tune `VARIANCE_DECOY_GENE`'s own
+parameters to force that specific raw-evidence flip back into existence:
+doing so would mean tuning the decoy to preserve a round-7 mechanism that
+belonged to a simpler, pre-module-layer version of this benchmark, which
+is backwards for the same reason Design 1 (shrinking the module layer to
+protect an old calibration) was rejected above. `VARIANCE_DECOY_GENE`
+remains a serious decoy on every other axis (replicated, robust,
+individually attractive, moderation still reduces its apparent precision,
+still scientifically plausible enough that an incomplete analysis could
+favor it over `TRUE_GENE`) -- it is just no longer required that raw
+combined p specifically rank it above `TRUE_GENE`. As of round 9, the
+benchmark's difficulty is intended to come from the whole chain (alignment
+repair -> independent per-cohort analysis -> recognizing broad
+module-scale coordinated change -> composition-aware normalization ->
+moderated inference -> replication/robustness -> optional
+module-specificity reasoning) rather than from any single pairwise
+candidate comparison being individually load-bearing. If a future Harbor
+campaign shows agents recovering `TRUE_GENE` too easily, that will be
+diagnosed from real trajectories and addressed then, rather than
+pre-emptively re-tuned against a hypothetical.
+
+**Workflow replay on the final, committed dataset** (median-of-ratios
+unless noted; ✓ = reaches `GENE_138`, ✗ = does not):
+- Naive pooled DE (cohort-blind): `GENE_120` -- ✗
+- Position-based metadata join (the misalignment bug, uncorrected):
+  `GENE_060` under median-of-ratios, `GENE_255` under real TMM/voom -- ✗
+  either way
+- Plain total-count CPM, otherwise the complete correct procedure:
+  `GENE_255` -- ✗ (the round-9 module-layer competitor)
+- Cohort2 alone (BH-ranked): `GENE_154` (technical artifact, wrong-signed
+  in cohort1) -- ✗
+- Most cross-cohort-consistent gate-survivor (ignoring evidence strength):
+  `GENE_204`/`CONSISTENCY_GENE` -- ✗ (unchanged from round 6/8; the
+  round-9 competitors `GENE_255`/`GENE_035` are close behind it on this
+  metric but do not overtake it)
+- Cohort1 alone (BH-ranked): `GENE_138` -- ✓ (unchanged from before round
+  9; cohort1 was always this candidate's cleanest single-cohort result,
+  not a gap the replication requirement was ever meant to close)
+- Complete replication+robustness procedure, ranked by raw (non-moderated)
+  combined evidence among gate-survivors: `GENE_138` -- ✓ (see the
+  non-recalibration note above)
+- Sign-blind Fisher combination / nominal-significance-without-sign-check:
+  `GENE_138` -- ✓ (see the non-recalibration note above; the technical
+  artifact's own cohort1 p, 0.0505, is not available for either shortcut
+  to mistakenly admit)
+- Complete replication+robustness+moderation procedure with no reference to
+  module context at all: `GENE_138` -- ✓ (module-specificity is
+  corroborating context, never a required determinant, by design)
+
+Four of nine replayed workflows still fail to reach `GENE_138`, spanning
+four independent failure mechanisms (pooling, misalignment, wrong
+normalization, wrong-cohort trust) -- module-specificity reasoning is
+genuinely optional, exactly as intended, and moderated variance remains
+scientifically correct and fully used even though it is no longer the
+single deciding mechanism against `VARIANCE_DECOY_GENE` specifically.
+
+**What changed, precisely.**
+- `data_generation/generate_data.py`: added `MODULES`,
+  `DESIGNED_GENE_MODULES`, `EFFECT_CLASS_PROBS`, `assign_gene_modules`,
+  `assign_module_effects`, `_rebalance_module_effects`, and
+  `compute_log2_median_ratio`; `simulate_counts` gained an
+  `extra_effects` parameter; `differential_expression_for_cohort`,
+  `pooled_differential_expression`, `cohort_symmetric_worst_case_loo_p`,
+  and `cohort_moderated_p_value` switched from `pipeline_stats.compute_log2_cpm`
+  to the new local `compute_log2_median_ratio`; `main()` now also writes
+  `public/gene_modules.csv`. `TRUE_GENE.log2fc_c2` was **not** touched
+  (still 0.95, round 8's locked, real-tool-validated value).
+  `VARIANCE_DECOY_GENE`'s own parameters were **not** touched either (see
+  the non-recalibration note above).
+- `task/solution/solve.py` and `task/tests/test_outputs.py`: independent
+  reimplementations of the same `compute_log2_median_ratio` (matching this
+  repo's established "separately-written, not shared code" pattern), same
+  as the moderated-variance and symmetric-LOO logic before it.
+  `task/environment/data/pipeline/stats.py` (the supplied, agent-visible
+  legacy pipeline) was **not** changed -- it still implements plain
+  total-count CPM only, unchanged, since discovering that this specific
+  normalization choice needs reconsidering is part of what this round
+  tests.
+- `task/instruction.md`: added one sentence noting the pipeline may have
+  more than one issue and that analysis choices should be justified from
+  the data, and one neutral mention of `gene_modules.csv`'s existence with
+  no interpretation. Nothing naming CPM, TMM, DESeq2, median-of-ratios,
+  compositional bias, or module breadth/specificity was added anywhere
+  agent-visible.
+- `task/environment/data/` and `task/tests/data/`: `expression_matrix.csv`
+  and `sample_metadata.csv` regenerated with the frozen module layer;
+  `gene_modules.csv` added to `task/environment/data/` (not
+  `task/tests/data/` -- the verifier's own recomputation never reads it).
+- `data_generation/private/ground_truth.json`: regenerated. `top_gene`
+  unchanged (`GENE_138`/`TRUE_GENE`). `rejected_competing_gene` unchanged
+  (`GENE_154`/`CONFOUND_GENE`). `heterogeneity_assessment` unchanged
+  (`consistent_both_cohorts`). Cohort fold-changes and adjusted p-value
+  shifted modestly under the new normalization (cohort1 1.619, cohort2
+  0.666, adjusted p 5.8e-4) -- well within the verifier's existing
+  tolerances, not a new calibration.
+
+**Re-verification performed:** `solve.py` run end to end against the
+regenerated, committed `task/environment/data/`, producing output that
+passes all 9/9 verifier checks against the independently-regenerated
+`task/tests/test_outputs.py` reference. Module architecture regeneration
+confirmed byte-identical across independent runs (deterministic seeding).
+Median-of-ratios size factors cross-validated against real DESeq2's
+`estimateSizeFactors` (<0.3% agreement). The full candidate frontier and
+workflow-replay table above were cross-checked against real limma-voom,
+edgeR's quasi-likelihood pipeline, and DESeq2, all TMM/median-ratio
+normalized, run against the exact locked dataset (not a scratch
+reimplementation) -- all three independently agree with the conclusions
+above.

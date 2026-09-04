@@ -190,6 +190,36 @@ sys.path.insert(0, str(REPO_ROOT / "task" / "environment" / "data"))
 from pipeline import stats as pipeline_stats  # noqa: E402  (path set above)
 
 
+def compute_log2_median_ratio(counts_by_sample: pd.DataFrame) -> pd.DataFrame:
+    """Composition-aware normalization (Anders & Huber 2010's median-of-
+    ratios, the same normalization DESeq2 uses internally): each sample's
+    size factor is the median, across genes with a positive count in every
+    sample of the given subset, of that gene's count divided by its
+    geometric mean across those samples. Unlike total-count CPM (see
+    pipeline/stats.py's compute_log2_cpm, the shipped legacy pipeline's own
+    normalization), a shift concentrated in a subset of genes does not move
+    every other gene's normalized value here -- CPM's single library-size
+    divisor does exactly that once enough of the panel has a real,
+    directionally-biased effect (round 9's module layer, see
+    task/README.md). Validated independently against real DESeq2's own
+    estimateSizeFactors on this exact dataset (size factors agree to
+    <0.3%); the ground truth this produces was cross-checked against
+    limma-voom/TMM and edgeR-QL/TMM as well, which need not compute
+    numerically identical size factors to agree on the resulting candidate
+    ranking, and do (see task/README.md's "Round 9" section).
+    """
+    positive_only = counts_by_sample.where(counts_by_sample > 0)
+    log_counts = np.log(positive_only)
+    log_geo_mean = log_counts.mean(axis=1)
+    valid_genes = np.isfinite(log_geo_mean)
+    log_ratios = log_counts.loc[valid_genes].sub(log_geo_mean[valid_genes], axis=0)
+    log_size_factors = log_ratios.median(axis=0)
+    size_factors = np.exp(log_size_factors)
+    size_factors = size_factors / np.exp(np.log(size_factors).mean())
+    normalized = counts_by_sample.div(size_factors, axis=1)
+    return np.log2(normalized + 1.0)
+
+
 def stable_seed(*parts) -> int:
     """Deterministic replacement for hash((...)) % 2**31 (PYTHONHASHSEED-proof)."""
     key = "|".join(str(p) for p in parts).encode("utf-8")
@@ -341,7 +371,237 @@ DESIGNED_POSITIONS = {
 }
 
 
-def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.random.Generator):
+# Round 9: a synthetic pathway/module annotation layer. Module labels are
+# deliberately repeated across many genes -- significant and null alike --
+# so membership alone is never diagnostic for any individual gene; what
+# carries information is the empirical DISTRIBUTION of behavior within a
+# module (how many of its members independently replicate, how broad that
+# activation is) versus one candidate's own evidence relative to that
+# distribution. This is generated with the exact same per-gene model
+# already used throughout this file (baseline/sigma/log2fc_c1/log2fc_c2
+# per gene, independent Poisson-lognormal noise) -- no new latent factor.
+# "type" here (generic broad-response program vs. disease-associated
+# module) is an authoring-only label controlling each module's effect-class
+# MIX; it is never written to any public file or exposed to the agent --
+# the module names themselves (MAPK_SIGNALING, DISEASE_ADAPTATION_D, etc.)
+# are the only agent-visible information, and neither "generic" nor
+# "disease" ever appears as a literal string in public data.
+MODULES = {
+    "MAPK_SIGNALING": {"size": 28, "type": "generic"},
+    "ACTIN_REMODELING": {"size": 24, "type": "generic"},
+    "TRANSLATION": {"size": 30, "type": "generic"},
+    "CELL_CYCLE": {"size": 22, "type": "generic"},
+    "INTERFERON_RESPONSE": {"size": 18, "type": "generic"},
+    "OXIDATIVE_STRESS": {"size": 20, "type": "generic"},
+    "METABOLIC_ADAPTATION": {"size": 19, "type": "generic"},
+    "DNA_DAMAGE": {"size": 17, "type": "generic"},
+    "DISEASE_SIGNALING_A": {"size": 25, "type": "disease"},
+    "DISEASE_SIGNALING_B": {"size": 24, "type": "disease"},
+    "DISEASE_STATE_C": {"size": 22, "type": "disease"},
+    "DISEASE_ADAPTATION_D": {"size": 21, "type": "disease"},
+}
+
+# Manual module placement for the core designed genes -- their own
+# statistics are untouched by this layer (already locked, round 8); only
+# their module tag(s) are added here. CONFOUND_GENE, REAL_HETEROGENEITY_GENE,
+# and the SENTINEL_* genes are deliberately left out of every module:
+# CONFOUND_GENE's story is a technical artifact, not biology, and tagging
+# it with a module would muddy that; the others aren't part of the
+# module-specificity trap and stay as they were.
+DESIGNED_GENE_MODULES = {
+    "TRUE_GENE": ["DISEASE_ADAPTATION_D"],
+    "VARIANCE_DECOY_GENE": ["TRANSLATION"],
+    "NEAR_MISS_GENE": ["DISEASE_SIGNALING_A"],
+    "CONSISTENCY_GENE": ["ACTIN_REMODELING", "DISEASE_STATE_C"],
+    "GHOST_REPLICATOR": ["MAPK_SIGNALING"],
+}
+
+# Per-module-type effect-class mix for the randomly-assigned (non-hand-set)
+# module members. "generic" (broad-response) modules carry a higher
+# fraction of real, modest, cross-cohort-replicated responders; "disease"
+# modules are mostly quiet with a smaller subset of specific responders.
+# Every module still gets null, weak, cohort-specific, and discordant
+# genes regardless of type -- type only shifts the MIX, never guarantees
+# any individual gene's own class.
+EFFECT_CLASS_PROBS = {
+    "generic": {"null": 0.50, "weak": 0.13, "moderate": 0.27, "cohort_specific": 0.07, "discordant": 0.03},
+    "disease": {"null": 0.63, "weak": 0.15, "moderate": 0.12, "cohort_specific": 0.07, "discordant": 0.03},
+}
+
+# TRANSLATION (VARIANCE_DECOY_GENE's module) and DISEASE_ADAPTATION_D
+# (TRUE_GENE's module) get their exact class counts hand-set rather than
+# left to a probabilistic draw, so their intended texture -- broad-but-
+# mixed activation for the former, a mostly-quiet module with a few
+# genuine alternative responders for the latter -- is guaranteed, not just
+# likely. Counts exclude the one slot each module's core designed gene
+# already occupies (29 and 20 remaining slots respectively).
+_TRANSLATION_EXPLICIT_CLASSES = (
+    ["moderate"] * 8 + ["cohort_specific"] * 4 + ["discordant"] * 2 + ["null"] * 15
+)
+_DISEASE_ADAPTATION_D_EXPLICIT_CLASSES = (
+    ["moderate"] * 3 + ["cohort_specific"] * 2 + ["discordant"] * 1 + ["null"] * 14
+)
+
+
+def _draw_effect_class_params(class_name: str, rng: np.random.Generator) -> tuple[float, float]:
+    if class_name == "null":
+        return 0.0, 0.0
+    if class_name == "weak":
+        mag = float(rng.uniform(0.25, 0.45))
+        sign = 1.0 if rng.random() < 0.5 else -1.0
+        return sign * mag, sign * mag
+    if class_name == "moderate":
+        mag = float(rng.uniform(0.6, 0.9))
+        sign = 1.0 if rng.random() < 0.5 else -1.0
+        return sign * mag, sign * mag
+    if class_name == "cohort_specific":
+        mag = float(rng.uniform(0.7, 1.1))
+        sign = 1.0 if rng.random() < 0.5 else -1.0
+        return (sign * mag, 0.0) if rng.random() < 0.5 else (0.0, sign * mag)
+    if class_name == "discordant":
+        mag1 = float(rng.uniform(0.5, 0.9))
+        mag2 = float(rng.uniform(0.5, 0.9))
+        sign = 1.0 if rng.random() < 0.5 else -1.0
+        return sign * mag1, -sign * mag2
+    raise ValueError(f"unknown effect class: {class_name}")
+
+
+def assign_gene_modules(n_genes: int) -> dict[str, list[int]]:
+    """Deterministically assign module membership across the panel.
+
+    Module labels are assigned first, broadly and repeatedly, entirely
+    independent of any gene's later-drawn effect class -- membership never
+    determines, by itself, whether a given gene turns out significant.
+    Returns module_name -> list of assigned positions (0-indexed).
+    """
+    reserved_positions = set(DESIGNED_POSITIONS.values())
+    available = [p for p in range(n_genes) if p not in reserved_positions]
+    shuffle_rng = np.random.default_rng(stable_seed("module-assignment", "shuffle"))
+    shuffle_rng.shuffle(available)
+
+    module_to_positions: dict[str, list[int]] = {name: [] for name in MODULES}
+    for label, modules in DESIGNED_GENE_MODULES.items():
+        pos = DESIGNED_POSITIONS[label]
+        for m in modules:
+            module_to_positions[m].append(pos)
+
+    cursor = 0
+    for name, spec in MODULES.items():
+        remaining = spec["size"] - len(module_to_positions[name])
+        for _ in range(remaining):
+            module_to_positions[name].append(available[cursor])
+            cursor += 1
+
+    # A small number of additional multi-module genes, beyond the one
+    # deliberate case (CONSISTENCY_GENE) above.
+    extra_rng = np.random.default_rng(stable_seed("module-assignment", "multi"))
+    all_assigned = sorted({p for positions in module_to_positions.values() for p in positions})
+    for _ in range(6):
+        pos = int(extra_rng.choice(all_assigned))
+        current_modules = {m for m, positions in module_to_positions.items() if pos in positions}
+        candidates = [m for m in MODULES if m not in current_modules]
+        extra_module = candidates[int(extra_rng.integers(0, len(candidates)))]
+        module_to_positions[extra_module].append(pos)
+
+    return module_to_positions
+
+
+def assign_module_effects(module_to_positions: dict[str, list[int]]) -> dict[int, tuple[float, float]]:
+    """For each module-tagged background position (excluding the core
+    designed genes, whose own effects are already locked at round 8),
+    draw an effect class conditioned on its module's type and return the
+    resulting (log2fc_c1, log2fc_c2) for positions that end up non-null.
+    Positions not present in the returned dict remain ordinary null
+    background genes.
+    """
+    reserved = set(DESIGNED_POSITIONS.values())
+    effects: dict[int, tuple[float, float]] = {}
+    class_rng = np.random.default_rng(stable_seed("module-effects", "classes"))
+
+    explicit_positions = {
+        "TRANSLATION": [p for p in module_to_positions["TRANSLATION"] if p not in reserved],
+        "DISEASE_ADAPTATION_D": [p for p in module_to_positions["DISEASE_ADAPTATION_D"] if p not in reserved],
+    }
+    explicit_classes = {
+        "TRANSLATION": list(_TRANSLATION_EXPLICIT_CLASSES),
+        "DISEASE_ADAPTATION_D": list(_DISEASE_ADAPTATION_D_EXPLICIT_CLASSES),
+    }
+    handled_positions: set[int] = set()
+    for module_name, positions in explicit_positions.items():
+        classes = explicit_classes[module_name]
+        assert len(positions) == len(classes), (
+            f"{module_name}: {len(positions)} open slots but {len(classes)} explicit classes"
+        )
+        shuffled = list(positions)
+        class_rng.shuffle(shuffled)
+        for pos, cls in zip(shuffled, classes):
+            log2fc_c1, log2fc_c2 = _draw_effect_class_params(cls, class_rng)
+            if (log2fc_c1, log2fc_c2) != (0.0, 0.0):
+                effects[pos] = (log2fc_c1, log2fc_c2)
+            handled_positions.add(pos)
+
+    for name, spec in MODULES.items():
+        if name in explicit_classes:
+            continue
+        probs = EFFECT_CLASS_PROBS[spec["type"]]
+        class_names = list(probs.keys())
+        class_weights = list(probs.values())
+        for pos in module_to_positions[name]:
+            if pos in reserved or pos in handled_positions:
+                continue
+            handled_positions.add(pos)
+            cls = class_names[int(class_rng.choice(len(class_names), p=class_weights))]
+            log2fc_c1, log2fc_c2 = _draw_effect_class_params(cls, class_rng)
+            if (log2fc_c1, log2fc_c2) != (0.0, 0.0):
+                effects[pos] = (log2fc_c1, log2fc_c2)
+
+    return _rebalance_module_effects(effects, class_rng)
+
+
+def _rebalance_module_effects(
+    effects: dict[int, tuple[float, float]], rng: np.random.Generator
+) -> dict[int, tuple[float, float]]:
+    """~110 real-effect genes each shift log2(CPM) for every OTHER gene
+    slightly, via ordinary library-size normalization -- if their signs
+    have any net directional bias, treated samples' total library size
+    drifts relative to control's, which uniformly (and spuriously)
+    dampens or inflates every untouched gene's own apparent effect,
+    including the core designed genes'. A per-gene independent 50/50 sign
+    draw is not enough to keep that net bias small in aggregate. Greedily
+    flip signs (both cohorts together, preserving each gene's own
+    same-sign/cohort-specific/discordant shape) to bring the net log2fc
+    sum in each cohort close to zero, so the module layer adds real,
+    detectable per-module texture without perturbing the panel's overall
+    normalization.
+    """
+    order = list(effects.keys())
+    perm = rng.permutation(len(order))
+    order = [order[i] for i in perm]
+
+    for _ in range(30):  # run to convergence (each pass is cheap: pure arithmetic)
+        improved = False
+        for pos in order:
+            c1, c2 = effects[pos]
+            net_c1 = sum(v[0] for v in effects.values())
+            net_c2 = sum(v[1] for v in effects.values())
+            current = abs(net_c1) + abs(net_c2)
+            flipped_net_c1 = net_c1 - 2 * c1
+            flipped_net_c2 = net_c2 - 2 * c2
+            flipped = abs(flipped_net_c1) + abs(flipped_net_c2)
+            if flipped < current:
+                effects[pos] = (-c1, -c2)
+                improved = True
+        if not improved:
+            break
+    return effects
+
+
+def simulate_counts(
+    metadata: pd.DataFrame,
+    gene_symbols: list[str],
+    rng: np.random.Generator,
+    extra_effects: dict[int, tuple[float, float]] | None = None,
+):
     sample_ids = metadata["sample_id"].tolist()
     condition_by_id = dict(zip(metadata["sample_id"], metadata["condition"]))
     cohort_by_id = dict(zip(metadata["sample_id"], metadata["cohort"]))
@@ -357,6 +617,7 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
     gene_symbols = list(gene_symbols)
     position_to_label = {pos: label for label, pos in DESIGNED_POSITIONS.items()}
     designed_gene_symbols = {label: gene_symbols[pos] for label, pos in DESIGNED_POSITIONS.items()}
+    extra_effects = extra_effects or {}
 
     counts = np.zeros((len(gene_symbols), n_samples), dtype=np.int64)
 
@@ -374,9 +635,12 @@ def simulate_counts(metadata: pd.DataFrame, gene_symbols: list[str], rng: np.ran
         else:
             baseline = float(np.exp(grng.uniform(np.log(20.0), np.log(3000.0))))
             base_sigma = float(grng.uniform(0.25, 0.45))
-            log2fc_c1 = 0.0
-            log2fc_c2 = 0.0
             z_loading = 0.0
+            if gi in extra_effects:
+                log2fc_c1, log2fc_c2 = extra_effects[gi]
+            else:
+                log2fc_c1 = 0.0
+                log2fc_c2 = 0.0
 
         for si, sid in enumerate(sample_ids):
             is_treated = condition_by_id[sid] == "treated"
@@ -439,7 +703,7 @@ def differential_expression_for_cohort(
     condition = pd.Series(
         metadata.set_index("sample_id").loc[ids, "condition"].to_numpy(), index=ids
     )
-    log2cpm = pipeline_stats.compute_log2_cpm(counts)
+    log2cpm = compute_log2_median_ratio(counts)
     de_table = pipeline_stats.differential_expression(log2cpm, condition)
     return de_table.sort_values("adjusted_p_value")
 
@@ -451,7 +715,7 @@ def pooled_differential_expression(counts_df: pd.DataFrame, metadata: pd.DataFra
     condition = pd.Series(
         metadata.set_index("sample_id").loc[ids, "condition"].to_numpy(), index=ids
     )
-    log2cpm = pipeline_stats.compute_log2_cpm(counts)
+    log2cpm = compute_log2_median_ratio(counts)
     de_table = pipeline_stats.differential_expression(log2cpm, condition)
     return de_table.sort_values("adjusted_p_value")
 
@@ -500,7 +764,7 @@ def cohort_symmetric_worst_case_loo_p(
         n1, n2 = len(control_ids), len(treated_ids)
         df_g = n1 + n2 - 2
 
-        log2cpm = pipeline_stats.compute_log2_cpm(counts_df[remaining])
+        log2cpm = compute_log2_median_ratio(counts_df[remaining])
         var_c = log2cpm[control_ids].var(axis=1, ddof=1)
         var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
         pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
@@ -579,7 +843,7 @@ def cohort_moderated_p_value(
     n1, n2 = len(control_ids), len(treated_ids)
     df_g = n1 + n2 - 2
 
-    log2cpm = pipeline_stats.compute_log2_cpm(counts_df[ids])
+    log2cpm = compute_log2_median_ratio(counts_df[ids])
     var_c = log2cpm[control_ids].var(axis=1, ddof=1)
     var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
     pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
@@ -781,11 +1045,33 @@ def main() -> None:
     rng = np.random.default_rng(stable_seed("rnaseq-metadata-misalignment", "gene-panel"))
     gene_symbols = make_gene_symbols(N_GENES, rng)
 
+    # Round 9 module architecture is FROZEN here: assigned once,
+    # deterministically, and never adjusted to protect any particular
+    # TRUE_GENE calibration (round 8's 0.95 is no longer assumed valid --
+    # see task/README.md's "Round 9" section). TRUE_GENE's own log2fc_c2
+    # is recalibrated separately, against this fixed architecture.
+    module_to_positions = assign_gene_modules(N_GENES)
+    module_effects = assign_module_effects(module_to_positions)
+
     metadata = build_sample_roster()
-    counts_df, designed_positions, designed_gene_symbols = simulate_counts(metadata, gene_symbols, rng)
+    counts_df, designed_positions, designed_gene_symbols = simulate_counts(
+        metadata, gene_symbols, rng, extra_effects=module_effects
+    )
     counts_df, designed_gene_symbols, old_to_new_symbols = neutralize_gene_symbols(
         counts_df, designed_gene_symbols
     )
+
+    # Neutral gene ID for panel position p is always f"GENE_{p+1:03d}" by
+    # construction (see neutralize_gene_symbols) -- no lookup needed.
+    position_to_modules: dict[int, list[str]] = {}
+    for module_name, positions in module_to_positions.items():
+        for p in positions:
+            position_to_modules.setdefault(p, []).append(module_name)
+    module_rows = [
+        {"gene_id": f"GENE_{p + 1:03d}", "modules": "|".join(sorted(mods))}
+        for p, mods in sorted(position_to_modules.items())
+    ]
+    gene_modules_df = pd.DataFrame(module_rows)
 
     acq_rng = np.random.default_rng(stable_seed("acquisition-order"))
     acq_order = acquisition_order(metadata["sample_id"].tolist(), acq_rng)
@@ -798,6 +1084,7 @@ def main() -> None:
 
     metadata.to_csv(public_dir / "sample_metadata.csv", index=False)
     expr_public.to_csv(public_dir / "expression_matrix.csv")
+    gene_modules_df.to_csv(public_dir / "gene_modules.csv", index=False)
 
     ground_truth = lock_ground_truth(counts_df, metadata)
     write_prior_report(public_dir)
@@ -815,6 +1102,8 @@ def main() -> None:
     print("Generated:")
     print(f"  public/sample_metadata.csv: {len(metadata)} rows")
     print(f"  public/expression_matrix.csv: {expr_public.shape[0]} genes x {expr_public.shape[1]} samples")
+    total_slots = sum(spec["size"] for spec in MODULES.values())
+    print(f"  public/gene_modules.csv: {len(gene_modules_df)} tagged genes, {total_slots} total module slots")
     print(f"  public/prior_pilot_report.md")
     print(f"  private/ground_truth.json: top_gene={ground_truth['top_gene']!r}")
     summary = {k: v for k, v in ground_truth.items() if "ranked_table" not in k}

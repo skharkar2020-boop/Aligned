@@ -72,28 +72,29 @@ VALID_HETEROGENEITY_LABELS = {
     "opposite_direction_between_cohorts",
 }
 
-# log2 fold-change is a plain difference of group means in log2(CPM+1)
+# log2 fold-change is a plain difference of group means in normalized-log2
 # space within one cohort, so it is essentially method-invariant (Welch vs.
-# Student t, or a different multiple-testing correction, do not move it).
-# Naive pooling of both cohorts moves the top candidate's own fold-change
-# by ~0.5 in the locked dataset (1.62 home-cohort vs. 1.11 pooled), outside
-# this tolerance -- though naive pooling is already caught by top_gene not
-# matching at all (it promotes the round-7 variance-fragile decoy, whose
-# own apparent strength does not survive moderated-variance re-evaluation);
-# every other wrong scenario checked during authoring names a different
-# gene entirely too. This tolerance stays generous to method choice while
-# still separating a real fix from a contaminated estimate.
+# Student t, a different multiple-testing correction, or a different
+# composition-aware normalization choice -- median-of-ratios vs. TMM -- do
+# not move it by much; see task/README.md's "Round 9" section for the
+# cross-tool comparison). Naive pooling of both cohorts moves the top
+# candidate's own fold-change by ~0.48 in the locked dataset (1.62
+# home-cohort vs. 1.14 pooled), outside this tolerance -- though naive
+# pooling is already caught by top_gene not matching at all (it promotes
+# the round-7 variance-fragile decoy); every other wrong scenario checked
+# during authoring names a different gene entirely too. This tolerance
+# stays generous to method choice while still separating a real fix from a
+# contaminated estimate.
 LOG2FC_ABS_TOL = 0.2
 
 # adjusted_p_value is sensitive to the exact test/correction choice, so we
 # only require it land clearly in significant territory and be within a
-# wide log-scale band of the reference value (~7.2e-04 in the locked
+# wide log-scale band of the reference value (~5.8e-04 in the locked
 # dataset -- the strongest generalizable candidate's own headline effect is
-# deliberately modest as of round 7, not a landslide against the decoy on
-# raw/unmoderated evidence). Naive pooling's own adjusted p-value for that
-# candidate (~3.6e-4) does not by itself clear this ceiling either way --
-# that scenario is caught by top_gene mismatch instead (see LOG2FC_ABS_TOL
-# above), not by this ceiling.
+# deliberately modest, not a landslide against the decoys on raw/unmoderated
+# evidence). This scenario (naive pooling) is caught by top_gene mismatch
+# regardless of where its own adjusted p-value happens to land (see
+# LOG2FC_ABS_TOL above).
 ADJ_P_MAX_FOR_SIGNIFICANT = 2e-3
 ADJ_P_LOG10_TOL = 3.0
 
@@ -182,10 +183,31 @@ DIRECTION_MISMATCH_PATTERNS = tuple(
 )
 
 
-def _compute_log2_cpm(counts: pd.DataFrame) -> pd.DataFrame:
-    library_sizes = counts.sum(axis=0)
-    cpm = counts.div(library_sizes, axis=1) * 1e6
-    return np.log2(cpm + 1.0)
+def _compute_log2_median_ratio(counts: pd.DataFrame) -> pd.DataFrame:
+    """Composition-aware normalization (Anders & Huber 2010's median-of-
+    ratios, the same normalization DESeq2 uses internally) -- see
+    task/solution/solve.py's compute_log2_median_ratio for why this
+    verifier's independent recomputation no longer uses the supplied
+    pipeline's plain total-count CPM (pipeline/stats.py's
+    compute_log2_cpm): once repaired per-cohort analysis on this dataset
+    turns up broad, coordinated transcriptional change rather than a single
+    isolated hit, a normalization whose reference point moves along with
+    the treatment effect biases every other gene's apparent fold-change in
+    the same direction. Implemented independently from solve.py (same
+    algorithm, separate code, per this file's own module docstring) and
+    validated against real DESeq2's own estimateSizeFactors (size factors
+    agree to <0.3%; see task/README.md's "Round 9" section).
+    """
+    positive_only = counts.where(counts > 0)
+    log_counts = np.log(positive_only)
+    log_geo_mean = log_counts.mean(axis=1)
+    valid_genes = np.isfinite(log_geo_mean)
+    log_ratios = log_counts.loc[valid_genes].sub(log_geo_mean[valid_genes], axis=0)
+    log_size_factors = log_ratios.median(axis=0)
+    size_factors = np.exp(log_size_factors)
+    size_factors = size_factors / np.exp(np.log(size_factors).mean())
+    normalized = counts.div(size_factors, axis=1)
+    return np.log2(normalized + 1.0)
 
 
 def _benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:
@@ -201,7 +223,7 @@ def _benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:
 
 
 def _differential_expression(counts: pd.DataFrame, condition: pd.Series) -> pd.DataFrame:
-    log2cpm = _compute_log2_cpm(counts)
+    log2cpm = _compute_log2_median_ratio(counts)
     a = log2cpm[condition[condition == "control"].index].to_numpy(dtype=float)
     b = log2cpm[condition[condition == "treated"].index].to_numpy(dtype=float)
     t_stat, p_value = scipy_stats.ttest_ind(b, a, axis=1, equal_var=False)
@@ -242,7 +264,7 @@ def _cohort_symmetric_worst_case_loo_p(
         n1, n2 = len(control_ids), len(treated_ids)
         df_g = n1 + n2 - 2
 
-        log2cpm = _compute_log2_cpm(expr[remaining])
+        log2cpm = _compute_log2_median_ratio(expr[remaining])
         var_c = log2cpm[control_ids].var(axis=1, ddof=1)
         var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
         pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
@@ -305,7 +327,7 @@ def _cohort_moderated_p_value(expr: pd.DataFrame, metadata: pd.DataFrame, cohort
     n1, n2 = len(control_ids), len(treated_ids)
     df_g = n1 + n2 - 2
 
-    log2cpm = _compute_log2_cpm(expr[ids])
+    log2cpm = _compute_log2_median_ratio(expr[ids])
     var_c = log2cpm[control_ids].var(axis=1, ddof=1)
     var_t = log2cpm[treated_ids].var(axis=1, ddof=1)
     pooled_var = ((n1 - 1) * var_c + (n2 - 1) * var_t) / df_g
